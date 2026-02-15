@@ -23,6 +23,60 @@ from typing import Any
 
 import cv2
 import numpy as np
+from bidi.algorithm import get_display
+from PIL import ImageFont, ImageDraw, Image
+
+
+def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    """Load a TrueType font that supports Hebrew, Arabic, CJK and Latin.
+
+    Tries platform fonts in preference order, falls back to Pillow default.
+    """
+    import os, platform
+
+    candidates: list[str] = []
+    if platform.system() == "Windows":
+        windir = os.environ.get("WINDIR", r"C:\Windows")
+        fonts = os.path.join(windir, "Fonts")
+        candidates = [
+            os.path.join(fonts, "arial.ttf"),      # Latin + Hebrew + Arabic
+            os.path.join(fonts, "segoeui.ttf"),     # Segoe UI
+            os.path.join(fonts, "tahoma.ttf"),      # good Hebrew support
+            os.path.join(fonts, "calibri.ttf"),
+        ]
+    elif platform.system() == "Darwin":
+        candidates = [
+            "/System/Library/Fonts/SFNSText.ttf",
+            "/System/Library/Fonts/Helvetica.ttc",
+            "/Library/Fonts/Arial.ttf",
+        ]
+    else:  # Linux / RPi
+        candidates = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        ]
+
+    for path in candidates:
+        if os.path.isfile(path):
+            try:
+                return ImageFont.truetype(path, size)
+            except Exception:
+                continue
+
+    # Last resort – Pillow's built-in bitmap font (ASCII only)
+    return ImageFont.load_default()
+
+
+# Font cache: {size: font_object}
+_font_cache: dict[int, ImageFont.FreeTypeFont | ImageFont.ImageFont] = {}
+
+
+def _get_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    """Get a cached font at the requested pixel size."""
+    if size not in _font_cache:
+        _font_cache[size] = _load_font(size)
+    return _font_cache[size]
 
 
 class AnnotationOverlay:
@@ -144,7 +198,20 @@ class AnnotationOverlay:
         elif atype == "text" and len(pts) >= 1:
             text = ann.get("text", "")
             if text:
-                pos = px(pts[0])
-                font_scale = ann.get("font_scale", 0.8)
-                cv2.putText(img, text, pos, cv2.FONT_HERSHEY_SIMPLEX,
-                            font_scale, color, thick, cv2.LINE_AA)
+                x, y = px(pts[0])
+                # Scale font to frame height so text is readable on 1080p
+                # Base: ~32px at 1080p, scaling with the width slider
+                base_size = max(24, int(h * 0.03))
+                font_size = base_size + (thick - 1) * 4
+                font = _get_font(font_size)
+
+                # Reorder RTL text (Hebrew/Arabic) to visual order
+                display_text = get_display(text)
+
+                # Render with Pillow (supports Unicode / Hebrew / Arabic)
+                pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+                draw = ImageDraw.Draw(pil_img)
+                # color is BGR tuple → convert to RGB for Pillow
+                rgb_color = (color[2], color[1], color[0])
+                draw.text((x, y - font_size), display_text, font=font, fill=rgb_color)
+                cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR, dst=img)
