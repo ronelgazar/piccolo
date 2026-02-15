@@ -1,0 +1,86 @@
+# Piccolo – Stereoscopic Surgery Display
+# ========================================
+
+display:
+  width: 1920
+  height: 1080
+  fullscreen: true
+  fps: 60
+
+  # Which monitor to send the stereo output to.
+  #   "auto"  – auto-detect Goovis glasses (USB-C / HDMI)
+  #   0, 1, 2 – explicit monitor index (run.py --list-monitors to check)
+  # The computer screen stays free for the web viewer.
+  monitor: auto
+
+cameras:
+  # Camera backend:
+  #   "opencv"    – cross-platform (auto-uses DirectShow on Windows)
+  #   "dshow"     – force Windows DirectShow (best for USB ELP cameras)
+  #   "picamera2" – Raspberry Pi CSI cameras via libcamera
+  backend: opencv
+
+  left:
+    index: 1          # ELP camera – left eye
+    width: 1920
+    height: 1080
+  right:
+    index: 2          # ELP camera – right eye
+    width: 1920
+    height: 1080
+
+  # Set true to use a synthetic test pattern instead of real cameras
+  test_mode: false
+
+  # --- ELP camera tips ---
+  # The ELP USB cameras support MJPEG at 1920x1080@30fps out of the box.
+  # If you only see low FPS, make sure both cameras are on separate USB
+  # host controllers (not just separate ports on the same hub).
+  # Run:  python -m src.camera  to discover camera indices.
+
+stereo:
+  zoom:
+    min: 1.0
+    max: 5.0
+    step: 0.02          # zoom delta per tick while key is held
+    tick_ms: 30          # how often the zoom updates while held (ms)
+  convergence:
+    base_offset: 0       # horizontal pixel shift (+ = more convergent)
+    step: 1              # pixels per tick
+    auto_adjust: true    # scale offset down as zoom increases
+
+  alignment:
+    enabled: true          # auto-correct vertical misalignment & rotation
+    interval_sec: 2.0      # re-estimate every N seconds
+    min_matches: 12        # minimum SIFT feature matches required
+    max_features: 1500     # SIFT keypoints to detect (more = better matches)
+    match_ratio: 0.75      # Lowe's ratio test threshold
+    ransac_thresh: 2.0     # Fundamental Matrix RANSAC threshold (px)
+    max_correction_px: 80  # clamp max vertical correction (pixels)
+    max_correction_deg: 2.0 # clamp max rotation correction (degrees)
+    smoothing: 0.25        # EMA factor (0 = instant, 1 = never)
+    detection_scale: 0.5   # downsample images for detection (speed)
+
+calibration:
+  crosshair_color: [0, 255, 0]
+  crosshair_thickness: 2
+  crosshair_size: 40
+  blink_interval_sec: 1.0    # seconds per eye during blink phase
+  blink_cycles: 3            # how many L-R-L-R cycles
+
+controls:
+  # Pygame key names  (see pygame.key docs)
+  zoom_in: EQUALS          # '=' / '+' key – hold to zoom in
+  zoom_out: MINUS          # '-' key – hold to zoom out
+  converge_in: RIGHTBRACKET  # ']'
+  converge_out: LEFTBRACKET  # '['
+  toggle_calibration: c
+  toggle_alignment: a     # toggle automatic stereo alignment
+  reset: r
+  quit: ESCAPE
+
+stream:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8080
+  jpeg_quality: 80       # 0-100
