@@ -159,6 +159,49 @@ class AnnotationOverlay:
 
         return eye_l, eye_r
 
+    def render_on_sbs(self, sbs: np.ndarray) -> np.ndarray:
+        """Draw all annotations onto the SBS (side-by-side) image in-place.
+        This is used for the 'Annotated' stream/tab, so placement is correct in 3D context.
+        """
+        h, w = sbs.shape[:2]
+        eye_w = w // 2
+        left = sbs[:, :eye_w]
+        right = sbs[:, eye_w:]
+        self.render(left, right)
+        return sbs
+
+    def render_on_fused(self, eye_l: np.ndarray, eye_r: np.ndarray) -> np.ndarray:
+        """Create a fused (averaged) image and render annotations in fused positions."""
+        # Simple average for fusion (could use more advanced fusion if needed)
+        fused = ((eye_l.astype(np.float32) + eye_r.astype(np.float32)) / 2).astype(np.uint8)
+        h, w = fused.shape[:2]
+        with self._lock:
+            annotations = list(self._annotations)
+        if not annotations:
+            return fused
+        disp = self.disparity_offset
+        for ann in annotations:
+            pts = ann.get("points", [])
+            # Average the x disparity for fused placement
+            fused_pts = []
+            for pt in pts:
+                # pt is normalized [0,1] in single-eye
+                x = pt[0]
+                y = pt[1]
+                # If annotation is from left, right is shifted by -disp; if from right, left is shifted by +disp
+                source = ann.get("source_eye", "left")
+                if source == "left":
+                    x_r = x - disp / w
+                    x_fused = (x + x_r) / 2
+                else:
+                    x_l = x + disp / w
+                    x_fused = (x + x_l) / 2
+                fused_pts.append([x_fused, y])
+            ann_fused = ann.copy()
+            ann_fused["points"] = fused_pts
+            self._draw_one(fused, ann_fused, x_offset_px=0)
+        return fused
+
     # ------------------------------------------------------------------
     # Per-annotation drawing
     # ------------------------------------------------------------------

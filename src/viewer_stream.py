@@ -101,6 +101,8 @@ _INDEX_HTML = r"""<!DOCTYPE html>
   <div class="stream-area">
     <div class="stream-tabs">
       <button class="active" onclick="sw('/video_feed',this)">SBS 3D</button>
+      <button onclick="sw('/video_annotated',this)">Annotated SBS</button>
+      <button onclick="sw('/video_fused_annotated',this)">Fused Annotated</button>
       <button onclick="sw('/video_anaglyph',this)">Anaglyph 3D</button>
       <span class="tab-sep"></span>
       <button onclick="sw('/video_left',this)">Left</button>
@@ -209,6 +211,8 @@ function sw(src, btn) {
   const info = document.getElementById('stream-info');
   if (src === '/video_anaglyph') info.textContent = 'Requires Red/Cyan 3D glasses';
   else if (src === '/video_feed') info.textContent = 'Side-by-side 3D \u2013 for Goovis / VR headsets';
+  else if (src === '/video_annotated') info.textContent = 'Annotated SBS (with overlay)';
+  else if (src === '/video_fused_annotated') info.textContent = 'Fused Annotated (true 3D merge)';
   else info.textContent = '';
 }
 
@@ -470,7 +474,7 @@ _ANNOTATE_HTML = r"""<!DOCTYPE html>
     <div class="tool-group">
       <h3>Disparity</h3>
       <div style="display:flex;align-items:center;gap:8px">
-        <input type="range" id="disp-slider" min="-200" max="200" value="0" step="1"
+        <input type="range" id="disp-slider" min="-400" max="400" value="0" step="1"
                style="flex:1;height:28px;cursor:pointer;accent-color:var(--accent,#0af)"
                oninput="setDisparity(this.value)">
         <span id="disp-val" style="min-width:48px;text-align:right;font-size:1em;font-weight:600">0px</span>
@@ -956,6 +960,20 @@ class ViewerStream:
                 mimetype="multipart/x-mixed-replace; boundary=frame",
             )
 
+        @app.route("/video_annotated")
+        def video_annotated():
+            return Response(
+                server._generate("annotated"),
+                mimetype="multipart/x-mixed-replace; boundary=frame",
+            )
+
+        @app.route("/video_fused_annotated")
+        def video_fused_annotated():
+            return Response(
+                server._generate("fused_annotated"),
+                mimetype="multipart/x-mixed-replace; boundary=frame",
+            )
+
         # ── Control API ──
 
         @app.route("/api/action/<action_name>", methods=["POST"])
@@ -1018,9 +1036,21 @@ class ViewerStream:
             data = request.get_json(silent=True) or {}
             offset = int(data.get("offset", 0))
             # Clamp to reasonable range
-            offset = max(-200, min(200, offset))
+            offset = max(-400, min(400, offset))
             server.annotations.disparity_offset = offset
             return jsonify({"ok": True, "disparity_offset": offset})
+
+        @app.route("/api/zoom_center", methods=["POST"])
+        def api_zoom_center():
+            data = request.get_json(silent=True) or {}
+            center = int(data.get("center", 50))
+            # Clamp to 0-100
+            center = max(0, min(100, center))
+            # Set on processor (via app)
+            if hasattr(server, 'app') and hasattr(server.app, 'processor'):
+                server.app.processor.set_joint_zoom_center(center)
+            server.cfg.joint_zoom_center = center
+            return jsonify({"ok": True, "zoom_center": center})
 
         return app
 
@@ -1037,6 +1067,18 @@ class ViewerStream:
                         left = raw_l.copy() if raw_l is not None else None
                         right = raw_r.copy() if raw_r is not None else None
                         frame = None
+                    elif which == "annotated":
+                        raw = self._frame_sbs
+                        frame = raw.copy() if raw is not None else None
+                        if frame is not None:
+                            self.annotations.render_on_sbs(frame)
+                    elif which == "fused_annotated":
+                        raw_l = self._frame_left
+                        raw_r = self._frame_right
+                        if raw_l is not None and raw_r is not None:
+                            frame = self.annotations.render_on_fused(raw_l, raw_r)
+                        else:
+                            frame = None
                     else:
                         if which == "sbs":
                             raw = self._frame_sbs

@@ -133,7 +133,11 @@ class PiccoloApp:
 
             # 3 ─ Stereo processing (zoom + convergence) → writes into
             #     pre-allocated SBS buffer to avoid allocation every frame
-            eye_l, eye_r, sbs = self.processor.process_pair(frame_l, frame_r)
+            # Use joint zoom center if set
+            if hasattr(self.processor, 'joint_zoom_center'):
+                eye_l, eye_r, sbs = self.processor.process_pair_joint_zoom(frame_l, frame_r)
+            else:
+                eye_l, eye_r, sbs = self.processor.process_pair(frame_l, frame_r)
 
             # 4a ─ Apply persistent per-eye nudge offsets (always)
             eye_l, eye_r = self.calibration.apply_nudge(eye_l, eye_r)
@@ -218,6 +222,27 @@ class PiccoloApp:
             self.aligner.reset()
             self.calibration.reset_nudge()
             print("[piccolo] Reset zoom, convergence, alignment & nudge.")
+
+        if Action.PEDAL_ZOOM_IN in actions:
+            self.processor.zoom_in()
+        if Action.PEDAL_ZOOM_OUT in actions:
+            self.processor.zoom_out()
+        if Action.PEDAL_CENTER_LEFT in actions:
+            # Move center left by 2%
+            if hasattr(self.processor, 'joint_zoom_center'):
+                self.processor.set_joint_zoom_center(self.processor.joint_zoom_center - 2)
+        if Action.PEDAL_CENTER_RIGHT in actions:
+            # Move center right by 2%
+            if hasattr(self.processor, 'joint_zoom_center'):
+                self.processor.set_joint_zoom_center(self.processor.joint_zoom_center + 2)
+        if Action.PEDAL_CENTER_UP in actions:
+            # Move center up by 2%
+            if hasattr(self.processor, 'joint_zoom_center_y'):
+                self.processor.set_joint_zoom_center_y(self.processor.joint_zoom_center_y - 2)
+        if Action.PEDAL_CENTER_DOWN in actions:
+            # Move center down by 2%
+            if hasattr(self.processor, 'joint_zoom_center_y'):
+                self.processor.set_joint_zoom_center_y(self.processor.joint_zoom_center_y + 2)
 
     def _handle_web_command(self, cmd: str):
         """Translate a web UI command string into an action."""

@@ -29,6 +29,15 @@ class Action(Enum):
     CALIB_NUDGE_RIGHT = auto()
     RESET = auto()
     QUIT = auto()
+    PEDAL_MODE_TOGGLE = auto()
+    PEDAL_MODE_CENTER_X = auto()
+    PEDAL_MODE_CENTER_Y = auto()
+    PEDAL_ZOOM_IN = auto()
+    PEDAL_ZOOM_OUT = auto()
+    PEDAL_CENTER_LEFT = auto()
+    PEDAL_CENTER_RIGHT = auto()
+    PEDAL_CENTER_UP = auto()
+    PEDAL_CENTER_DOWN = auto()
 
 
 def _key_const(name: str) -> int:
@@ -51,9 +60,9 @@ class InputHandler:
         self.cfg = cfg
         self._keymap: dict[int, Action] = {}
         self._build_keymap()
-
-        # Keys currently held down → continuous actions (zoom, convergence)
         self._held: Set[Action] = set()
+        # Pedal mode: 0=zoom, 1=center-x, 2=center-y
+        self.pedal_mode = 0
 
     def _build_keymap(self):
         mapping = {
@@ -68,6 +77,15 @@ class InputHandler:
             "calib_nudge_right": Action.CALIB_NUDGE_RIGHT,
             "reset": Action.RESET,
             "quit": Action.QUIT,
+            "pedal_mode_toggle": Action.PEDAL_MODE_TOGGLE,
+            "pedal_mode_center_x": Action.PEDAL_MODE_CENTER_X,
+            "pedal_mode_center_y": Action.PEDAL_MODE_CENTER_Y,
+            "pedal_zoom_in": Action.PEDAL_ZOOM_IN,
+            "pedal_zoom_out": Action.PEDAL_ZOOM_OUT,
+            "pedal_center_left": Action.PEDAL_CENTER_LEFT,
+            "pedal_center_right": Action.PEDAL_CENTER_RIGHT,
+            "pedal_center_up": Action.PEDAL_CENTER_UP,
+            "pedal_center_down": Action.PEDAL_CENTER_DOWN,
         }
         for attr, action in mapping.items():
             key_name = getattr(self.cfg, attr, None)
@@ -97,21 +115,43 @@ class InputHandler:
         returned only once on key-down.
         """
         one_shot: Set[Action] = set()
-
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 one_shot.add(Action.QUIT)
             elif event.type == pygame.KEYDOWN:
-                action = self._keymap.get(event.key)
-                if action is None:
-                    continue
-                if action in self._CONTINUOUS:
-                    self._held.add(action)
+                # PEDAL LOGIC (simulate with F1, F2, F3 for now)
+                if event.key == pygame.K_F1:  # Left pedal
+                    self.pedal_mode = (self.pedal_mode + 1) % 3
+                    if self.pedal_mode == 0:
+                        one_shot.add(Action.PEDAL_MODE_TOGGLE)
+                    elif self.pedal_mode == 1:
+                        one_shot.add(Action.PEDAL_MODE_CENTER_X)
+                    elif self.pedal_mode == 2:
+                        one_shot.add(Action.PEDAL_MODE_CENTER_Y)
+                elif event.key == pygame.K_F2:  # Middle pedal
+                    if self.pedal_mode == 0:
+                        one_shot.add(Action.PEDAL_ZOOM_IN)
+                    elif self.pedal_mode == 1:
+                        one_shot.add(Action.PEDAL_CENTER_LEFT)
+                    elif self.pedal_mode == 2:
+                        one_shot.add(Action.PEDAL_CENTER_UP)
+                elif event.key == pygame.K_F3:  # Right pedal
+                    if self.pedal_mode == 0:
+                        one_shot.add(Action.PEDAL_ZOOM_OUT)
+                    elif self.pedal_mode == 1:
+                        one_shot.add(Action.PEDAL_CENTER_RIGHT)
+                    elif self.pedal_mode == 2:
+                        one_shot.add(Action.PEDAL_CENTER_DOWN)
                 else:
-                    one_shot.add(action)
+                    action = self._keymap.get(event.key)
+                    if action is None:
+                        continue
+                    if action in self._CONTINUOUS:
+                        self._held.add(action)
+                    else:
+                        one_shot.add(action)
             elif event.type == pygame.KEYUP:
                 action = self._keymap.get(event.key)
                 if action is not None:
                     self._held.discard(action)
-
         return self._held | one_shot

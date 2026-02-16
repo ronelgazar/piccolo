@@ -48,6 +48,10 @@ class StereoProcessor:
         self.zoom: float = cfg.zoom.min
         self.base_offset: int = cfg.convergence.base_offset
 
+        # Joint zoom center (horizontal and vertical, percent 0-100)
+        self.joint_zoom_center = 50
+        self.joint_zoom_center_y = 50
+
         # Pre-allocated output buffers (avoids np.hstack allocation every frame)
         self._sbs = np.empty((eye_height, eye_width * 2, 3), dtype=np.uint8)
         self._eye_l = self._sbs[:, :eye_width]       # view into left half
@@ -72,6 +76,14 @@ class StereoProcessor:
     def reset(self):
         self.zoom = self.cfg.zoom.min
         self.base_offset = self.cfg.convergence.base_offset
+
+    def set_joint_zoom_center(self, center: int):
+        """Set the joint zoom center as a percentage (0-100)."""
+        self.joint_zoom_center = max(0, min(100, center))
+
+    def set_joint_zoom_center_y(self, center_y: int):
+        """Set the joint zoom vertical center as a percentage (0-100)."""
+        self.joint_zoom_center_y = max(0, min(100, center_y))
 
     # ------------------------------------------------------------------
     # Core processing
@@ -154,3 +166,26 @@ class StereoProcessor:
         eye_l = self.process_eye(frame_l, "left", dst=self._eye_l)
         eye_r = self.process_eye(frame_r, "right", dst=self._eye_r)
         return eye_l, eye_r, self._sbs
+
+    def process_pair_joint_zoom(self, frame_l: np.ndarray, frame_r: np.ndarray):
+        """Process both eyes using a joint zoom center (horizontal and vertical percent)."""
+        h, w = frame_l.shape[:2]
+        roi_w = int(w / self.zoom)
+        roi_h = int(h / self.zoom)
+        # Center as percent (0-100)
+        cx = int(w * (getattr(self, 'joint_zoom_center', 50) / 100.0))
+        cy = int(h * (getattr(self, 'joint_zoom_center_y', 50) / 100.0))
+        # Clamp crop
+        x1 = max(cx - roi_w // 2, 0)
+        y1 = max(cy - roi_h // 2, 0)
+        x2 = min(x1 + roi_w, w)
+        y2 = min(y1 + roi_h, h)
+        x1 = max(x2 - roi_w, 0)
+        y1 = max(y2 - roi_h, 0)
+        crop_l = frame_l[y1:y2, x1:x2]
+        crop_r = frame_r[y1:y2, x1:x2]
+        eye_l = cv2.resize(crop_l, (self.eye_w, self.eye_h), interpolation=cv2.INTER_LINEAR)
+        eye_r = cv2.resize(crop_r, (self.eye_w, self.eye_h), interpolation=cv2.INTER_LINEAR)
+        self._eye_l[:] = eye_l
+        self._eye_r[:] = eye_r
+        return self._eye_l, self._eye_r, self._sbs
