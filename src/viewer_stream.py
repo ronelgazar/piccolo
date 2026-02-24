@@ -62,6 +62,7 @@ _INDEX_HTML = r"""<!DOCTYPE html>
                 padding:6px; overflow:hidden; }
   .stream-img img { max-width:100%; max-height:100%; object-fit:contain;
                     border:1px solid #333; border-radius:4px; }
+  .stream-img canvas { position:absolute; cursor:crosshair; border-radius:4px; }
 
   /* ─── control panel ─── */
   .controls { width:280px; flex-shrink:0; background:var(--panel); padding:14px;
@@ -109,8 +110,9 @@ _INDEX_HTML = r"""<!DOCTYPE html>
       <button onclick="sw('/video_right',this)">Right</button>
     </div>
     <div class="stream-info" id="stream-info">Side-by-side 3D &ndash; for Goovis / VR headsets</div>
-    <div class="stream-img">
-      <img id="stream" src="/video_feed" alt="live stream"/>
+    <div class="stream-img" style="position:relative;">
+      <img id="stream" src="/video_feed" alt="live stream" style="display:block;max-width:100%;max-height:100%;"/>
+      <canvas id="zoom-crosshair" style="position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;"></canvas>
     </div>
   </div>
 
@@ -125,6 +127,20 @@ _INDEX_HTML = r"""<!DOCTYPE html>
                 onpointerleave="holdStop()">&#x2212; Zoom<span class="kbd">-</span></button>
         <button class="ctrl-btn hold" data-action="zoom_in"
                 onpointerdown="holdStart('zoom_in')" onpointerup="holdStop()"
+                onpointerleave="holdStop()">&#x2b; Zoom<span class="kbd">+</span></button>
+      </div>
+    </div>
+
+    <!-- Zoom (Custom Center) -->
+    <div class="ctrl-group">
+      <h3>Zoom (Custom Center)</h3>
+      <div style="margin-bottom:6px;font-size:0.8em;color:var(--muted);">Click the image to set zoom center</div>
+      <div class="btn-row">
+        <button class="ctrl-btn hold" data-action="zoom_out"
+                onpointerdown="customZoom('out')" onpointerup="holdStop()"
+                onpointerleave="holdStop()">&#x2212; Zoom<span class="kbd">-</span></button>
+        <button class="ctrl-btn hold" data-action="zoom_in"
+                onpointerdown="customZoom('in')" onpointerup="holdStop()"
                 onpointerleave="holdStop()">&#x2b; Zoom<span class="kbd">+</span></button>
       </div>
     </div>
@@ -1044,13 +1060,18 @@ class ViewerStream:
         def api_zoom_center():
             data = request.get_json(silent=True) or {}
             center = int(data.get("center", 50))
+            center_y = int(data.get("center_y", 50))
             # Clamp to 0-100
             center = max(0, min(100, center))
+            center_y = max(0, min(100, center_y))
             # Set on processor (via app)
             if hasattr(server, 'app') and hasattr(server.app, 'processor'):
                 server.app.processor.set_joint_zoom_center(center)
+                if hasattr(server.app.processor, 'set_joint_zoom_center_y'):
+                    server.app.processor.set_joint_zoom_center_y(center_y)
             server.cfg.joint_zoom_center = center
-            return jsonify({"ok": True, "zoom_center": center})
+            server.cfg.joint_zoom_center_y = center_y
+            return jsonify({"ok": True, "zoom_center": center, "zoom_center_y": center_y})
 
         return app
 
