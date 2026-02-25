@@ -21,11 +21,11 @@ cameras:
   backend: opencv
 
   left:
-    index: 0          # ELP camera – left eye
+    index: 1          # ELP camera – left eye
     width: 1920
     height: 1080
   right:
-    index: 1          # ELP camera – right eye
+    index: 2          # ELP camera – right eye
     width: 1920
     height: 1080
 

@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import cv2
 import numpy as np
+import time
 
 from .config import StereoCfg
 
@@ -189,3 +190,12 @@ class StereoProcessor:
         self._eye_l[:] = eye_l
         self._eye_r[:] = eye_r
         return self._eye_l, self._eye_r, self._sbs
+
+    def smooth_zoom_transition(self, target_zoom: float, steps: int = 10):
+        """Smoothly transition to the target zoom level in defined steps."""
+        step_size = (target_zoom - self.zoom) / steps
+        for _ in range(steps):
+            self.zoom += step_size
+            time.sleep(0.05)  # Small delay for smooth transition
+        self.zoom = target_zoom
+        print(f"Zoom smoothly transitioned to: {self.zoom}")

@@ -112,7 +112,7 @@ class CameraCapture:
         # FPS must also be set BEFORE fourcc for the same reason.
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-        self._cap.set(cv2.CAP_PROP_FPS, 30)
+        self._cap.set(cv2.CAP_PROP_FPS, 60)
         self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # minimal buffering
 
         # Try to negotiate MJPEG – ELP cameras decode MJPG in hardware
@@ -133,7 +133,7 @@ class CameraCapture:
                 self._cap = cv2.VideoCapture(self.index)
             self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
             self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-            self._cap.set(cv2.CAP_PROP_FPS, 30)
+            self._cap.set(cv2.CAP_PROP_FPS, 60)
             self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             actual_w = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             actual_h = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))

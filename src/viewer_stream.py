@@ -24,7 +24,10 @@ import time
 import cv2
 import numpy as np
 from flask import Flask, Response, render_template_string, jsonify, request
+from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from src.app import PiccoloApp
 from .config import StreamCfg
 from .annotation import AnnotationOverlay
 
@@ -105,6 +108,7 @@ _INDEX_HTML = r"""<!DOCTYPE html>
       <button onclick="sw('/video_annotated',this)">Annotated SBS</button>
       <button onclick="sw('/video_fused_annotated',this)">Fused Annotated</button>
       <button onclick="sw('/video_anaglyph',this)">Anaglyph 3D</button>
+      <button onclick="sw('/video_fused_3d',this)">Fused 3D</button>
       <span class="tab-sep"></span>
       <button onclick="sw('/video_left',this)">Left</button>
       <button onclick="sw('/video_right',this)">Right</button>
@@ -212,6 +216,16 @@ _INDEX_HTML = r"""<!DOCTYPE html>
   </div>
 </div>
 
+<!-- Fused 3D Alignment Slider -->
+<div class="ctrl-group" id="fused3d-slider-group" style="display:none;">
+  <h3>Fused 3D Alignment</h3>
+  <div>
+    <label for="alignment-slider">Adjust Alignment:</label>
+    <input type="range" id="alignment-slider" min="-400" max="400" value="0" step="1" oninput="updateAlignment(this.value)">
+    <span id="alignment-value">0</span>
+  </div>
+</div>
+
 <div class="footer">
   Stream URL: <code>http://&lt;host&gt;:{{ port }}/video_feed</code> &nbsp;|&nbsp;
   <a href="/annotate" style="color:#0d47a1">&#9998; Open Annotation Tool</a> &nbsp;|&nbsp;
@@ -230,6 +244,25 @@ function sw(src, btn) {
   else if (src === '/video_annotated') info.textContent = 'Annotated SBS (with overlay)';
   else if (src === '/video_fused_annotated') info.textContent = 'Fused Annotated (true 3D merge)';
   else info.textContent = '';
+
+  // Show/hide Fused 3D slider
+  const sliderGroup = document.getElementById('fused3d-slider-group');
+  if (sliderGroup) {
+    sliderGroup.style.display = (src === '/video_fused_3d') ? '' : 'none';
+    // Reset slider value display
+    const slider = document.getElementById('alignment-slider');
+    const valueSpan = document.getElementById('alignment-value');
+    if (slider && valueSpan) valueSpan.innerText = slider.value;
+  }
+}
+
+function updateAlignment(value) {
+  document.getElementById('alignment-value').innerText = value;
+  fetch('/api/adjust_alignment', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ offset: parseInt(value) })
+  });
 }
 
 /* ── single action ── */
@@ -322,6 +355,36 @@ function updateStatus() {
 }
 setInterval(updateStatus, 500);
 updateStatus();
+
+/* Visual feedback for alignment and convergence */
+function showAlignmentFeedback(alignmentData) {
+  const feedbackElement = document.getElementById('alignment-feedback');
+  if (!feedbackElement) {
+    const newElement = document.createElement('div');
+    newElement.id = 'alignment-feedback';
+    newElement.style.position = 'absolute';
+    newElement.style.bottom = '10px';
+    newElement.style.right = '10px';
+    newElement.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+    newElement.style.color = 'white';
+    newElement.style.padding = '10px';
+    newElement.style.borderRadius = '5px';
+    newElement.style.fontSize = '0.8rem';
+    document.body.appendChild(newElement);
+  }
+  const feedbackText = `Alignment: dy=${alignmentData.dy.toFixed(2)}px, dtheta=${alignmentData.dtheta.toFixed(2)}°`;
+  feedbackElement.textContent = feedbackText;
+}
+
+/* Update alignment feedback periodically */
+function updateAlignmentFeedback() {
+  fetch('/api/status').then(r => r.json()).then(d => {
+    if (d.alignment) {
+      showAlignmentFeedback(d.alignment);
+    }
+  }).catch(() => {});
+}
+setInterval(updateAlignmentFeedback, 500);
 </script>
 </body>
 </html>
@@ -490,7 +553,7 @@ _ANNOTATE_HTML = r"""<!DOCTYPE html>
     <div class="tool-group">
       <h3>Disparity</h3>
       <div style="display:flex;align-items:center;gap:8px">
-        <input type="range" id="disp-slider" min="-400" max="400" value="0" step="1"
+        <input type="range" id="disp-slider" min="-400" max="600" value="0" step="1"
                style="flex:1;height:28px;cursor:pointer;accent-color:var(--accent,#0af)"
                oninput="setDisparity(this.value)">
         <span id="disp-val" style="min-width:48px;text-align:right;font-size:1em;font-weight:600">0px</span>
@@ -499,6 +562,16 @@ _ANNOTATE_HTML = r"""<!DOCTYPE html>
         Shift annotations on the opposite eye to align with scene
       </div>
     </div>
+  </div>
+</div>
+
+<!-- Fused 3D Alignment Slider -->
+<div class="ctrl-group" id="fused3d-slider-group" style="display:none;">
+  <h3>Fused 3D Alignment</h3>
+  <div>
+    <label for="alignment-slider">Adjust Alignment:</label>
+    <input type="range" id="alignment-slider" min="-50" max="50" value="0" step="1" oninput="updateAlignment(this.value)">
+    <span id="alignment-value">0</span>
   </div>
 </div>
 
@@ -827,8 +900,11 @@ fetch('/api/annotations/list').then(r => r.json()).then(d => {
 class ViewerStream:
     """MJPEG streaming server that runs in a background thread."""
 
-    def __init__(self, cfg: StreamCfg):
+    def __init__(self, cfg: StreamCfg, app: PiccoloApp):
         self.cfg = cfg
+        self.app = app
+        self.cam_l = app.cam_l
+        self.cam_r = app.cam_r
         self._frame_sbs: np.ndarray | None = None
         self._frame_left: np.ndarray | None = None
         self._frame_right: np.ndarray | None = None
@@ -990,6 +1066,11 @@ class ViewerStream:
                 mimetype="multipart/x-mixed-replace; boundary=frame",
             )
 
+        @app.route("/video_fused_3d")
+        def video_fused_3d():
+            """Stream the fused 3D image construction simulation."""
+            return Response(server.generate_fused_3d(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
         # ── Control API ──
 
         @app.route("/api/action/<action_name>", methods=["POST"])
@@ -1051,10 +1132,19 @@ class ViewerStream:
         def api_ann_disparity():
             data = request.get_json(silent=True) or {}
             offset = int(data.get("offset", 0))
-            # Clamp to reasonable range
+            # Clamp the offset to a reasonable range
             offset = max(-400, min(400, offset))
             server.annotations.disparity_offset = offset
             return jsonify({"ok": True, "disparity_offset": offset})
+
+        @app.route("/api/adjust_alignment", methods=["POST"])
+        def api_adjust_alignment():
+            data = request.get_json(silent=True) or {}
+            offset = int(data.get("offset", 0))
+            # Clamp the offset to a reasonable range
+            offset = max(-50, min(50, offset))
+            server.cfg.alignment_offset = offset
+            return jsonify({"ok": True, "offset": offset})
 
         @app.route("/api/zoom_center", methods=["POST"])
         def api_zoom_center():
@@ -1144,3 +1234,44 @@ class ViewerStream:
                 time.sleep(0.033)
         finally:
             self._client_count -= 1
+
+    def generate_fused_3d(self):
+        """Generate frames for the Fused 3D simulation (optimized for speed and smoothness)."""
+        import time
+        while True:
+            t_start = time.time()
+            with self._lock:
+                if self.app.cam_l is None or self.app.cam_r is None:
+                    time.sleep(0.01)
+                    continue
+
+                frame_l = self.app.cam_l.read()
+                frame_r = self.app.cam_r.read()
+
+                if frame_l is None or frame_r is None:
+                    time.sleep(0.01)
+                    continue
+
+                # Apply horizontal offset from slider to right frame
+                rows, cols, _ = frame_r.shape
+                offset = getattr(self.cfg, 'alignment_offset', 0)
+                translation_matrix = np.float32([[1, 0, offset], [0, 1, 0]])
+                aligned_frame_r = cv2.warpAffine(frame_r, translation_matrix, (cols, rows), borderMode=cv2.BORDER_REPLICATE)
+
+                # Fuse frames in color (simple average)
+                fused_frame = cv2.addWeighted(frame_l, 0.5, aligned_frame_r, 0.5, 0)
+
+                # Encode the frame as JPEG
+                success, buffer = cv2.imencode('.jpg', fused_frame)
+                if not success:
+                    time.sleep(0.01)
+                    continue
+
+                frame = buffer.tobytes()
+
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            # Throttle to avoid CPU overload and allow smoother streaming
+            t_elapsed = time.time() - t_start
+            if t_elapsed < 0.01:
+                time.sleep(0.01 - t_elapsed)

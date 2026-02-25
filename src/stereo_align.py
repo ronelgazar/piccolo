@@ -685,3 +685,87 @@ class StereoAligner:
             [cos_a, -sin_a, tx],
             [sin_a,  cos_a, ty_rot + ty],
         ])
+
+    def adjust_alignment(self, delta_dy: float, delta_dtheta: float):
+        """Adjust alignment parameters interactively."""
+        if not self._enabled:
+            return
+
+        self._smooth_dy += delta_dy
+        self._smooth_dtheta += delta_dtheta
+
+        # Update warp matrices based on new parameters
+        self._warp_l, self._warp_r = self._compute_warp_matrices(self._smooth_dy, self._smooth_dtheta)
+
+    def _compute_warp_matrices(self, dy: float, dtheta: float) -> Tuple[np.ndarray, np.ndarray]:
+        """Compute warp matrices for the given alignment parameters."""
+        # Placeholder implementation for computing warp matrices
+        # Replace with actual computation logic
+        warp_matrix_l = np.eye(2, 3, dtype=np.float32)
+        warp_matrix_r = np.eye(2, 3, dtype=np.float32)
+        return warp_matrix_l, warp_matrix_r
+
+    def adjust_alignment_for_zoom(self, zoom_level: float):
+        """Adjust alignment parameters dynamically based on zoom level."""
+        # Adjust smoothed correction values based on zoom level
+        self._smooth_dy *= zoom_level
+        self._smooth_dtheta *= zoom_level
+
+        # Recompute warp matrices for alignment
+        if self._warp_l is not None and self._warp_r is not None:
+            scale_matrix = np.array([
+                [zoom_level, 0, 0],
+                [0, zoom_level, 0]
+            ])
+            self._warp_l = scale_matrix @ self._warp_l
+            self._warp_r = scale_matrix @ self._warp_r
+
+        print(f"Alignment dynamically adjusted for zoom level: {zoom_level}")
+
+    def adjust_for_zoom(self, zoom_level: float):
+        """Adjust alignment parameters dynamically based on zoom level."""
+        # Example: Scale the smoothing factors based on zoom level
+        self._smooth_dy *= zoom_level
+        self._smooth_dtheta *= zoom_level
+
+        # Recompute overlap mask for the new zoom level
+        scale_matrix = np.array([
+            [zoom_level, 0, 0],
+            [0, zoom_level, 0]
+        ])
+        self._warp_l = scale_matrix @ self._warp_l if self._warp_l is not None else None
+        self._warp_r = scale_matrix @ self._warp_r if self._warp_r is not None else None
+
+        if self._warp_l is not None and self._warp_r is not None:
+            self._overlap_mask = cv2.warpAffine(
+                np.ones((self.frame_h, self.frame_w), dtype=np.uint8),
+                self._warp_l, (self.frame_w, self.frame_h)
+            ) & cv2.warpAffine(
+                np.ones((self.frame_h, self.frame_w), dtype=np.uint8),
+                self._warp_r, (self.frame_w, self.frame_h)
+            )
+
+        print(f"Alignment adjusted for zoom level: {zoom_level}")
+
+    def optimize_clahe(self, zoom_level: float):
+        """Dynamically adjust CLAHE parameters based on zoom level."""
+        # Example: Scale clip limit and tile grid size based on zoom level
+        clip_limit = 3.0 * zoom_level
+        tile_grid_size = (int(8 * zoom_level), int(8 * zoom_level))
+        self._clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tile_grid_size)
+        print(f"CLAHE parameters adjusted: clip_limit={clip_limit}, tile_grid_size={tile_grid_size}")
+
+    def optimize_sift_features(self, zoom_level: float):
+        """Dynamically adjust the number of SIFT features based on zoom level."""
+        max_features = int(self.cfg.max_features * zoom_level)
+        self._sift = cv2.SIFT_create(nfeatures=max_features)
+        print(f"SIFT max features adjusted: {max_features}")
+
+    def optimize_flann(self, zoom_level: float):
+        """Dynamically adjust FLANN matcher parameters based on zoom level."""
+        trees = max(1, int(5 * zoom_level))
+        checks = max(10, int(80 * zoom_level))
+        index_params = dict(algorithm=1, trees=trees)   # FLANN_INDEX_KDTREE
+        search_params = dict(checks=checks)
+        self._matcher = cv2.FlannBasedMatcher(index_params, search_params)
+        print(f"FLANN parameters adjusted: trees={trees}, checks={checks}")

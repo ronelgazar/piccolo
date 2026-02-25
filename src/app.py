@@ -54,8 +54,8 @@ class PiccoloApp:
         )
         self.calibration = CalibrationOverlay(cfg.calibration)
         self.display = StereoDisplay(cfg.display)
-        self.input = InputHandler(cfg.controls)
-        self.stream = ViewerStream(cfg.stream) if cfg.stream.enabled else None
+        self.input = InputHandler(self.aligner, self.cfg.controls)
+        self.stream = ViewerStream(cfg.stream, self) if cfg.stream.enabled else None
 
         self._running = False
 
