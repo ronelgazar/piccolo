@@ -115,6 +115,7 @@ class InputHandler:
         returned only once on key-down.
         """
         one_shot: Set[Action] = set()
+        npad_held = set()
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 one_shot.add(Action.QUIT)
@@ -143,6 +144,8 @@ class InputHandler:
                     elif self.pedal_mode == 2:
                         one_shot.add(Action.PEDAL_CENTER_DOWN)
                 else:
+                    if event.key in (pygame.K_KP4, pygame.K_KP5,pygame.K_KP6):
+                        npad_held.add(event.key)
                     action = self._keymap.get(event.key)
                     if action is None:
                         continue
@@ -151,7 +154,65 @@ class InputHandler:
                     else:
                         one_shot.add(action)
             elif event.type == pygame.KEYUP:
+                if event.key in (pygame.K_KP4, pygame.K_KP5,pygame.K_KP6):
+                        npad_held.discard(event.key)
                 action = self._keymap.get(event.key)
                 if action is not None:
                     self._held.discard(action)
+        pressed = pygame.key.get_pressed()
+        kp4 = pygame.K_KP4
+        kp5 = pygame.K_KP5
+        kp6 = pygame.K_KP6
+        first = None
+        combo_action = None
+        combo_keys = [kp4,kp5,kp6]
+        pressed_numpad = [k for k in combo_keys if pressed[k]]
+
+        if len(pressed_numpad) >=2:
+            npad_held_order = list(npad_held)
+            if npad_held_order:
+                first = npad_held_order[0]
+                second = None
+                for k in pressed_numpad:
+                    if k!=first:
+                        second =k
+                        break
+
+
+                if first == kp6:
+                    print("6")
+                    if second == kp4:
+                        combo_action= Action.PEDAL_CENTER_DOWN
+                        print("ZOOM_OUT")
+                    if second ==kp5:
+                        combo_action= Action.ZOOM_IN
+                        print("ZOOM_IN")
+                elif first == kp5:
+                    print("5")
+                    if second == kp4 :
+                        
+                        combo_action=Action.PEDAL_CENTER_UP
+                        print("CALIB_NUDGE_LEFT")
+                    if second == kp6:
+                        combo_action=Action.CALIB_NUDGE_RIGHT
+                        print("CALIB_NUDGE_RIGHT")
+                if first ==kp4:
+                    print("4")
+                    if second == kp5:
+                        combo_action=Action.ZOOM_OUT
+                        print("PEDAL_CENTER_down")
+                    if second == kp6:
+                        combo_action = Action.CALIB_NUDGE_LEFT
+                        print("PEDAL_CENTER_UP")
+
+
+        self._held.discard(Action.ZOOM_OUT)
+        self._held.discard(Action.ZOOM_IN)
+        self._held.discard(Action.CALIB_NUDGE_LEFT)
+        self._held.discard(Action.CALIB_NUDGE_RIGHT)
+        self._held.discard(Action.PEDAL_CENTER_DOWN)
+        self._held.discard(Action.PEDAL_CENTER_UP)
+        
+        if combo_action:
+            return {combo_action} | one_shot
         return self._held | one_shot

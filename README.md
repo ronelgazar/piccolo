@@ -1,3 +1,6 @@
+
+RUN COMMAND IS py -3.12 run.py    
+
 # Piccolo – Stereoscopic Surgery Display
 
 Real-time stereo-3D display system for surgical goggles, replacing the

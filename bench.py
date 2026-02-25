@@ -13,8 +13,8 @@ cfg = load_config("config.yaml")
 cfg.display.fullscreen = False
 
 print("Opening cameras...", flush=True)
-cam_l = CameraCapture(1, 1920, 1080, backend="opencv", name="cam-L").start()
-cam_r = CameraCapture(2, 1920, 1080, backend="opencv", name="cam-R").start()
+cam_l = CameraCapture(0, 1920, 1080, backend="opencv", name="cam-L").start()
+cam_r = CameraCapture(1, 1920, 1080, backend="opencv", name="cam-R").start()
 time.sleep(1)  # let cameras warm up
 
 proc = StereoProcessor(cfg.stereo, 960, 1080)

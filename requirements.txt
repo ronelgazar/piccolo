@@ -1,7 +1,6 @@
 # Piccolo – Stereoscopic Surgery Display
 opencv-python>=4.8
 numpy>=1.24
-pygame>=2.5
 flask>=3.0
 pyyaml>=6.0
 screeninfo>=0.8
