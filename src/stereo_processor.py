@@ -63,16 +63,43 @@ class StereoProcessor:
     # ------------------------------------------------------------------
 
     def zoom_in(self):
+        prev_zoom = self.zoom
         self.zoom = min(self.zoom + self.cfg.zoom.step, self.cfg.zoom.max)
+        # Check alignment match count after zoom
+        if hasattr(self, 'aligner') and hasattr(self.aligner, 'result'):
+            min_matches = getattr(self.cfg.alignment, 'min_matches', 12)
+            n_matches = getattr(self.aligner.result, 'n_matches', min_matches)
+            if n_matches < min_matches:
+                # Too few matches, revert zoom
+                self.zoom = prev_zoom
+                print(f"[Zoom] Prevented excessive zoom: only {n_matches} matches (min {min_matches})")
 
     def zoom_out(self):
         self.zoom = max(self.zoom - self.cfg.zoom.step, self.cfg.zoom.min)
 
     def converge_in(self):
+        prev_offset = self.base_offset
         self.base_offset += self.cfg.convergence.step
+        # Check alignment match count after convergence
+        if hasattr(self, 'aligner') and hasattr(self.aligner, 'result'):
+            min_matches = getattr(self.cfg.alignment, 'min_matches', 12)
+            n_matches = getattr(self.aligner.result, 'n_matches', min_matches)
+            if n_matches < min_matches:
+                # Too few matches, revert convergence
+                self.base_offset = prev_offset
+                print(f"[Convergence] Prevented excessive convergence: only {n_matches} matches (min {min_matches})")
 
     def converge_out(self):
+        prev_offset = self.base_offset
         self.base_offset -= self.cfg.convergence.step
+        # Check alignment match count after convergence
+        if hasattr(self, 'aligner') and hasattr(self.aligner, 'result'):
+            min_matches = getattr(self.cfg.alignment, 'min_matches', 12)
+            n_matches = getattr(self.aligner.result, 'n_matches', min_matches)
+            if n_matches < min_matches:
+                # Too few matches, revert convergence
+                self.base_offset = prev_offset
+                print(f"[Convergence] Prevented excessive convergence: only {n_matches} matches (min {min_matches})")
 
     def reset(self):
         self.zoom = self.cfg.zoom.min

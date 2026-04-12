@@ -70,12 +70,12 @@ calibration:
 
 controls:
   # Pygame key names  (see pygame.key docs)
-  zoom_in: EQUALS          # '=' / '+' key – hold to zoom in
-  zoom_out: MINUS          # '-' key – hold to zoom out
+  zoom_in: [EQUALS, a]          # '=' / '+' key or left pedal
+  zoom_out: [MINUS, c]         # '-' key or right pedal
   converge_in: RIGHTBRACKET  # ']'
   converge_out: LEFTBRACKET  # '['
-  toggle_calibration: c
-  toggle_alignment: a     # toggle automatic stereo alignment
+  toggle_calibration: \
+  toggle_alignment: m   # toggle automatic stereo alignment
   reset: r
   quit: ESCAPE
 

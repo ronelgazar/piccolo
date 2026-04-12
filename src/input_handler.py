@@ -63,10 +63,25 @@ class InputHandler:
         self._keymap: dict[int, Action] = {}
         self._build_keymap()
         self._held: Set[Action] = set()
-        # Pedal mode: 0=zoom, 1=center-x, 2=center-y
-        self.pedal_mode = 0
-        # Track held numpad keys for pedal combos
+        # Track held pedal keys for combos
+        self._pedal_held = set()
+        # Track held numpad keys for pedal combos (legacy)
         self._npad_held = set()
+    def _pedal_key(self, event):
+        # Map pedal keys: a=left, b=middle, c=right
+        if not hasattr(event, "key"):
+            return None
+        if event.key == ord('a'):
+            return 'a'
+        elif event.key == ord('b'):
+            return 'b'
+        elif event.key == ord('c'):
+            return 'c'
+        return None
+
+    # Remove pedal mode logic, restore previous behavior
+    def get_pedal_mode(self):
+        return None
 
     def _build_keymap(self):
         mapping = {
@@ -92,12 +107,15 @@ class InputHandler:
             "pedal_center_down": Action.PEDAL_CENTER_DOWN,
         }
         for attr, action in mapping.items():
-            key_name = getattr(self.cfg, attr, None)
-            if key_name:
-                try:
-                    self._keymap[_key_const(key_name)] = action
-                except ValueError:
-                    pass  # skip unmappable keys
+            key_names = getattr(self.cfg, attr, None)
+            if key_names:
+                if not isinstance(key_names, (list, tuple)):
+                    key_names = [key_names]
+                for key_name in key_names:
+                    try:
+                        self._keymap[_key_const(key_name)] = action
+                    except ValueError:
+                        pass  # skip unmappable keys
 
     # ------------------------------------------------------------------
     # Public API
@@ -136,9 +154,36 @@ class InputHandler:
                 one_shot.add(Action.PEDAL_CENTER_DOWN)
 
     def _handle_key_event(self, event, one_shot):
-        """Handle key press and release events."""
+        """Handle key press and release events, including pedal logic."""
+        pedal = self._pedal_key(event)
         if event.type == pygame.KEYDOWN:
-            self._handle_pedal_logic(event, one_shot)
+            # Track pedal keys
+            if pedal:
+                self._pedal_held.add(pedal)
+                self._update_pedal_mode(pedal=pedal, keydown=True)
+            # If in a mode and a second pedal is pressed, trigger action
+            if self.pedal_mode and pedal and len(self._pedal_held) == 2:
+                pedals = sorted(self._pedal_held)
+                mode = self.pedal_mode
+                if mode == 'a':  # zoom
+                    # a+b = zoom in, a+c = zoom out
+                    if pedals == ['a', 'b']:
+                        one_shot.add(Action.ZOOM_IN)
+                    elif pedals == ['a', 'c']:
+                        one_shot.add(Action.ZOOM_OUT)
+                elif mode == 'b':  # up/down
+                    # b+a = up, b+c = down
+                    if pedals == ['a', 'b']:
+                        one_shot.add(Action.PEDAL_CENTER_UP)
+                    elif pedals == ['b', 'c']:
+                        one_shot.add(Action.PEDAL_CENTER_DOWN)
+                elif mode == 'c':  # left/right
+                    # c+a = left, c+b = right
+                    if pedals == ['a', 'c']:
+                        one_shot.add(Action.CALIB_NUDGE_LEFT)
+                    elif pedals == ['b', 'c']:
+                        one_shot.add(Action.CALIB_NUDGE_RIGHT)
+            # Legacy numpad support
             if event.key in (pygame.K_KP4, pygame.K_KP5, pygame.K_KP6):
                 self._npad_held.add(event.key)
             action = self._keymap.get(event.key)
@@ -148,6 +193,8 @@ class InputHandler:
                 else:
                     one_shot.add(action)
         elif event.type == pygame.KEYUP:
+            if pedal:
+                self._pedal_held.discard(pedal)
             if event.key in (pygame.K_KP4, pygame.K_KP5, pygame.K_KP6):
                 self._npad_held.discard(event.key)
             action = self._keymap.get(event.key)

@@ -167,7 +167,8 @@ class PiccoloApp:
             sbs = self._draw_hud(sbs)
 
             # 8 ─ Display (pre-allocated surface, zero-alloc blit)
-            self.display.show(sbs)
+            pedal_mode = self.input.get_pedal_mode()
+            self.display.show(sbs, pedal_mode=pedal_mode)
             self.display.tick()
 
             # 9 ─ Push status to web UI

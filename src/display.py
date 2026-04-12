@@ -149,12 +149,10 @@ class StereoDisplay:
     # Rendering
     # ------------------------------------------------------------------
 
-    def show(self, frame_bgr: np.ndarray):
+    def show(self, frame_bgr: np.ndarray, pedal_mode: str = None):
         """Display a BGR numpy frame (expected shape ``(height, width, 3)``).
 
-        Hot-path: avoids the expensive transpose + contiguous copy by
-        using ``pygame.image.frombuffer`` which reads row-major RGB
-        bytes directly – no (W,H,3) transposition needed.
+        Optionally overlays pedal mode string in bottom left.
         """
         if self.screen is None:
             return
@@ -172,6 +170,14 @@ class StereoDisplay:
             bytes(self._rgb_buf.data), (self.width, self.height), "RGB"
         )
         self.screen.blit(surf, (0, 0))
+
+        # Overlay pedal mode if provided
+        if pedal_mode:
+            font = pygame.font.SysFont("arial", 32)
+            text = f"Pedal Mode: {pedal_mode}"
+            text_surf = font.render(text, True, (0,255,0))
+            self.screen.blit(text_surf, (10, self.height - 50))
+
         pygame.display.flip()
 
     def tick(self) -> float:
