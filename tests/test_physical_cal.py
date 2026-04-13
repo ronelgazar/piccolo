@@ -1,6 +1,5 @@
 import numpy as np
 import cv2
-import pytest
 from src.physical_cal import PhysicalCalSession, PatternRenderer
 
 

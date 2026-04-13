@@ -1,11 +1,10 @@
 """Physical camera calibration — pattern rendering and session logic."""
 from __future__ import annotations
 
-import math
 import cv2
 import numpy as np
 
-PHASES = ["focus", "scale", "horizontal", "rotation"]
+PHASES: tuple[str, ...] = ("focus", "scale", "horizontal", "rotation")
 
 
 class PhysicalCalSession:
