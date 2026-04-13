@@ -92,3 +92,26 @@ class TestPatternRenderer:
         img = self._blank()
         r.render_rotation(img, dtheta_deg=None)
         assert img.sum() > 0
+
+    def test_render_horizontal_dy_text_differs_from_none(self):
+        r = PatternRenderer()
+        img_with = self._blank()
+        img_none = self._blank()
+        r.render_horizontal(img_with, dy=3.5)
+        r.render_horizontal(img_none, dy=None)
+        assert not np.array_equal(img_with, img_none)
+
+    def test_render_rotation_dot_absent_when_none(self):
+        r = PatternRenderer()
+        img_with = self._blank()
+        img_none = self._blank()
+        r.render_rotation(img_with, dtheta_deg=0.0)
+        r.render_rotation(img_none, dtheta_deg=None)
+        assert not np.array_equal(img_with, img_none)
+
+    def test_render_focus_is_inplace(self):
+        r = PatternRenderer()
+        img = self._blank()
+        result = r.render_focus(img, sharpness=100.0)
+        assert result is None
+        assert img.sum() > 0

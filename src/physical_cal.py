@@ -52,7 +52,7 @@ class PatternRenderer:
     """Draws phase-specific test patterns onto BGR images in-place."""
 
     def render_focus(self, img: np.ndarray, sharpness: float) -> None:
-        """Siemens star (36-spoke radial wheel) + sharpness score."""
+        """Siemens star (18-line / 36-sector radial wheel) + sharpness score."""
         h, w = img.shape[:2]
         cx, cy = w // 2, h // 2
         radius = min(h, w) // 4
