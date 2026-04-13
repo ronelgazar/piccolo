@@ -51,3 +51,44 @@ class TestSharpness:
                     img[y:y + 20, x:x + 20] = 255
         blurred = cv2.GaussianBlur(img, (21, 21), 0)
         assert PhysicalCalSession.sharpness(img) > PhysicalCalSession.sharpness(blurred)
+
+
+class TestPatternRenderer:
+    def _blank(self) -> np.ndarray:
+        return np.zeros((480, 640, 3), dtype=np.uint8)
+
+    def test_render_focus_modifies_image(self):
+        r = PatternRenderer()
+        img = self._blank()
+        r.render_focus(img, sharpness=750.0)
+        assert img.sum() > 0
+
+    def test_render_scale_modifies_image(self):
+        r = PatternRenderer()
+        img = self._blank()
+        r.render_scale(img)
+        assert img.sum() > 0
+
+    def test_render_horizontal_with_dy_modifies_image(self):
+        r = PatternRenderer()
+        img = self._blank()
+        r.render_horizontal(img, dy=3.5)
+        assert img.sum() > 0
+
+    def test_render_horizontal_with_none_modifies_image(self):
+        r = PatternRenderer()
+        img = self._blank()
+        r.render_horizontal(img, dy=None)
+        assert img.sum() > 0
+
+    def test_render_rotation_with_angle_modifies_image(self):
+        r = PatternRenderer()
+        img = self._blank()
+        r.render_rotation(img, dtheta_deg=1.2)
+        assert img.sum() > 0
+
+    def test_render_rotation_with_none_modifies_image(self):
+        r = PatternRenderer()
+        img = self._blank()
+        r.render_rotation(img, dtheta_deg=None)
+        assert img.sum() > 0
