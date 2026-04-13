@@ -9,3 +9,6 @@ python-bidi>=0.6
 
 # --- Raspberry Pi only (uncomment when deploying on RPi) ---
 # picamera2>=0.3
+
+pygame>=2.5
+pytest>=8.0
