@@ -21,6 +21,7 @@ class CameraDeviceCfg:
     index: int = 0
     width: int = 1920
     height: int = 1080
+    flip_180: bool = False  # rotate feed 180° (correct upside-down mounting)
 
 
 @dataclass

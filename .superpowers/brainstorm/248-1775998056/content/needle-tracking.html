@@ -1,0 +1,42 @@
+<h2>How should we detect and track the needle?</h2>
+<p class="subtitle">The needle's visual characteristics will determine the best tracking method. Pick the approach that best matches what you see in the video.</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Color Segmentation (HSV)</h3>
+      <p>Best if the needle has a <strong>distinct color</strong> (metallic silver, dark, or bright) that stands out from the white grid background. Fast and robust for high-contrast needles.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Very fast</li><li>Simple to tune</li><li>Works well on clean backgrounds</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Sensitive to lighting changes</li><li>Fails if color is similar to grid</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Edge + Contour Detection</h3>
+      <p>Best if the needle is <strong>thin and elongated</strong> (like a surgical needle or pin). Uses Canny edges and finds the needle by its shape — long, thin, pointed contour.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Works regardless of needle color</li><li>Good for metallic needles</li><li>Tracks tip precisely</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Grid lines may interfere</li><li>Needs shape filtering</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Background Subtraction + Blob</h3>
+      <p>Best if the grid is <strong>static</strong> and only the needle moves. Subtracts the background to isolate movement, then tracks the moving blob (needle tip).</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Ignores static grid automatically</li><li>Very clean isolation of movement</li><li>Works even if needle blends with grid</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Requires stable camera</li><li>Noise from vibration</li></ul></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top: 20px;">Not sure? Just describe the needle — metallic? dark? thin rod? — and I'll recommend one.</p>

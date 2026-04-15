@@ -125,7 +125,13 @@ class PiccoloApp:
                 self.display.tick()
                 continue
 
-            # 2b ─ Auto-align: correct vertical misalignment & rotation
+            # 2b ─ Apply 180° flip for upside-down mounted cameras
+            if self.cfg.cameras.left.flip_180:
+                frame_l = cv2.rotate(frame_l, cv2.ROTATE_180)
+            if self.cfg.cameras.right.flip_180:
+                frame_r = cv2.rotate(frame_r, cv2.ROTATE_180)
+
+            # 2d ─ Auto-align: correct vertical misalignment & rotation
             #      between cameras (periodic re-estimation + per-frame warp)
             if self.aligner.needs_update():
                 self.aligner.update(frame_l, frame_r)
@@ -229,21 +235,17 @@ class PiccoloApp:
         if Action.PEDAL_ZOOM_OUT in actions:
             self.processor.zoom_out()
         if Action.PEDAL_CENTER_LEFT in actions:
-            # Move center left by 2%
             if hasattr(self.processor, 'joint_zoom_center'):
-                self.processor.set_joint_zoom_center(self.processor.joint_zoom_center - 2)
+                self.processor.set_joint_zoom_center(self.processor.joint_zoom_center - 1)
         if Action.PEDAL_CENTER_RIGHT in actions:
-            # Move center right by 2%
             if hasattr(self.processor, 'joint_zoom_center'):
-                self.processor.set_joint_zoom_center(self.processor.joint_zoom_center + 2)
+                self.processor.set_joint_zoom_center(self.processor.joint_zoom_center + 1)
         if Action.PEDAL_CENTER_UP in actions:
-            # Move center up by 2%
             if hasattr(self.processor, 'joint_zoom_center_y'):
-                self.processor.set_joint_zoom_center_y(self.processor.joint_zoom_center_y - 2)
+                self.processor.set_joint_zoom_center_y(self.processor.joint_zoom_center_y - 1)
         if Action.PEDAL_CENTER_DOWN in actions:
-            # Move center down by 2%
             if hasattr(self.processor, 'joint_zoom_center_y'):
-                self.processor.set_joint_zoom_center_y(self.processor.joint_zoom_center_y + 2)
+                self.processor.set_joint_zoom_center_y(self.processor.joint_zoom_center_y + 1)
 
     def _handle_web_command(self, cmd: str):
         """Translate a web UI command string into an action."""

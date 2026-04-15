@@ -21,13 +21,15 @@ cameras:
   backend: opencv
 
   left:
-    index: 1          # ELP camera – left eye
+    index: 2          # ELP camera – left eye
     width: 1920
     height: 1080
+    flip_180: true   # set true if camera is mounted upside-down
   right:
-    index: 2          # ELP camera – right eye
+    index: 1          # ELP camera – right eye
     width: 1920
     height: 1080
+    flip_180: true   # set true if camera is mounted upside-down
 
   # Set true to use a synthetic test pattern instead of real cameras
   test_mode: false
@@ -42,8 +44,8 @@ stereo:
   zoom:
     min: 1.0
     max: 5.0
-    step: 1          # zoom delta per tick while key is held
-    tick_ms: 30          # how often the zoom updates while held (ms)
+    step: 0.1        # zoom delta per tick while key is held
+    tick_ms: 100      # how often the zoom updates while held (ms)
   convergence:
     base_offset: 0       # horizontal pixel shift (+ = more convergent)
     step: 1              # pixels per tick

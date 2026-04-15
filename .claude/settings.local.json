@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bash \"C:/Users/ronelgazar/.claude/plugins/cache/claude-plugins-official/superpowers/5.0.7/skills/brainstorming/scripts/start-server.sh\" --project-dir \"c:/Users/ronelgazar/Documents/University/year2/Semester1/Research/SurgeryRobot/piccolo\")",
+      "Bash(python -c \"import cv2, numpy, matplotlib, plotly, pandas; print\\('OK'\\)\")",
+      "Bash(python needle_tracker.py -h)",
+      "Bash(python -c \"import needle_tracker; print\\('Module imports successfully'\\)\")",
+      "Bash(python -c \"import needle_tracker; print\\('✓ Module imports successfully'\\); print\\('✓ CELL_SIZE_MM:', needle_tracker.CELL_SIZE_MM\\); print\\('✓ TRAJECTORY_LEN:', needle_tracker.TRAJECTORY_LEN\\)\")",
+      "Bash(python -c \"import needle_tracker; print\\('Module imports successfully'\\); print\\('CELL_SIZE_MM:', needle_tracker.CELL_SIZE_MM\\); print\\('TRAJECTORY_LEN:', needle_tracker.TRAJECTORY_LEN\\)\")",
+      "Bash(python -m pytest tests/test_needle_tracker.py -v)",
+      "Bash(pip install:*)",
+      "Bash(python -m pytest tests/test_needle_tracker.py -v --tb=short)",
+      "Bash(python3)",
+      "Bash(python -c \"from needle_tracker import compute_pixels_per_mm, pixel_to_mm, cell_number_from_x, compute_cell_count; print\\('All 4 functions imported successfully without cv2 dependency in the function code'\\)\")",
+      "Bash(python -c \"from needle_tracker import run_calibration; print\\('OK'\\)\")",
+      "Bash(python -c \"from needle_tracker import ORBStabilizer, NeedleDetector; print\\('OK'\\)\")",
+      "Bash(python -c \"from needle_tracker import annotate_frame; print\\('OK'\\)\")",
+      "Bash(python -c \"from needle_tracker import run_tracking; print\\('OK'\\)\")",
+      "Bash(python -c \"from needle_tracker import generate_graphs; print\\('OK'\\)\")",
+      "Bash(python -c \"import needle_tracker; print\\('All imports OK'\\)\")",
+      "Bash(python -c \"from needle_tracker import main; print\\('main\\(\\) found'\\)\")",
+      "Bash(python -c \"from needle_tracker import main, run_calibration, run_tracking, generate_graphs, ORBStabilizer, NeedleDetector, KalmanTracker, annotate_frame; print\\('All exports OK'\\)\")",
+      "Bash(python -m pytest tests/test_needle_tracker.py -q)",
+      "Bash(python -c \"import needle_tracker; print\\('OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('needle_tracker.py'\\).read\\(\\)\\); print\\('Syntax OK'\\)\")",
+      "Bash(.venv/Scripts/python -m pytest tests/test_physical_cal.py::TestPatternRenderer -v)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_physical_cal.py -v)"
+    ]
+  }
+}

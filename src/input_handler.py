@@ -63,8 +63,10 @@ class InputHandler:
         self._keymap: dict[int, Action] = {}
         self._build_keymap()
         self._held: Set[Action] = set()
-        # Track held pedal keys for combos
-        self._pedal_held = set()
+        # Pedal toggle mode: None | 'a' (zoom) | 'b' (side) | 'c' (up/down)
+        self.pedal_mode: str | None = None
+        # Maps adjust-pedal key → action, for continuous long-press
+        self._pedal_adjust_held: dict[str, Action] = {}
         # Track held numpad keys for pedal combos (legacy)
         self._npad_held = set()
     def _pedal_key(self, event):
@@ -79,9 +81,24 @@ class InputHandler:
             return 'c'
         return None
 
-    # Remove pedal mode logic, restore previous behavior
+    # Pedal mode → (adjust-pedal-b action, adjust-pedal-c action or adjust-pedal-a action)
+    # 'a' = zoom:      b → ZOOM_IN,           c → ZOOM_OUT
+    # 'b' = side:      a → CENTER_LEFT,        c → CENTER_RIGHT
+    # 'c' = up/down:   a → CENTER_UP,          b → CENTER_DOWN
+    _PEDAL_ADJUST_MAP: dict[str, dict[str, Action]] = {
+        'a': {'b': Action.ZOOM_IN,            'c': Action.ZOOM_OUT},
+        'b': {'a': Action.PEDAL_CENTER_LEFT,  'c': Action.PEDAL_CENTER_RIGHT},
+        'c': {'a': Action.PEDAL_CENTER_UP,    'b': Action.PEDAL_CENTER_DOWN},
+    }
+
+    def _pedal_adjust_action(self, pedal: str) -> Action | None:
+        """Return the action for an adjust pedal given the current mode."""
+        if self.pedal_mode is None:
+            return None
+        return self._PEDAL_ADJUST_MAP.get(self.pedal_mode, {}).get(pedal)
+
     def get_pedal_mode(self):
-        return None
+        return self.pedal_mode
 
     def _build_keymap(self):
         mapping = {
@@ -154,35 +171,27 @@ class InputHandler:
                 one_shot.add(Action.PEDAL_CENTER_DOWN)
 
     def _handle_key_event(self, event, one_shot):
-        """Handle key press and release events, including pedal logic."""
+        """Handle key press and release events, including pedal toggle logic."""
         pedal = self._pedal_key(event)
         if event.type == pygame.KEYDOWN:
-            # Track pedal keys
             if pedal:
-                self._pedal_held.add(pedal)
-                self._update_pedal_mode(pedal=pedal, keydown=True)
-            # If in a mode and a second pedal is pressed, trigger action
-            if self.pedal_mode and pedal and len(self._pedal_held) == 2:
-                pedals = sorted(self._pedal_held)
-                mode = self.pedal_mode
-                if mode == 'a':  # zoom
-                    # a+b = zoom in, a+c = zoom out
-                    if pedals == ['a', 'b']:
-                        one_shot.add(Action.ZOOM_IN)
-                    elif pedals == ['a', 'c']:
-                        one_shot.add(Action.ZOOM_OUT)
-                elif mode == 'b':  # up/down
-                    # b+a = up, b+c = down
-                    if pedals == ['a', 'b']:
-                        one_shot.add(Action.PEDAL_CENTER_UP)
-                    elif pedals == ['b', 'c']:
-                        one_shot.add(Action.PEDAL_CENTER_DOWN)
-                elif mode == 'c':  # left/right
-                    # c+a = left, c+b = right
-                    if pedals == ['a', 'c']:
-                        one_shot.add(Action.CALIB_NUDGE_LEFT)
-                    elif pedals == ['b', 'c']:
-                        one_shot.add(Action.CALIB_NUDGE_RIGHT)
+                if self.pedal_mode == pedal:
+                    # Same pedal pressed again → toggle mode off, stop any adjust
+                    self._clear_pedal_adjust()
+                    self.pedal_mode = None
+                    print(f"[pedal] mode OFF")
+                elif self.pedal_mode is None:
+                    # No mode active → toggle this pedal's mode on
+                    self.pedal_mode = pedal
+                    mode_names = {'a': 'ZOOM', 'b': 'SIDE', 'c': 'UP/DOWN'}
+                    print(f"[pedal] mode → {mode_names.get(pedal, pedal)}")
+                else:
+                    # Mode active, different pedal → adjust (immediate + continuous)
+                    action = self._pedal_adjust_action(pedal)
+                    if action is not None:
+                        one_shot.add(action)
+                        self._pedal_adjust_held[pedal] = action
+
             # Legacy numpad support
             if event.key in (pygame.K_KP4, pygame.K_KP5, pygame.K_KP6):
                 self._npad_held.add(event.key)
@@ -192,14 +201,20 @@ class InputHandler:
                     self._held.add(action)
                 else:
                     one_shot.add(action)
+
         elif event.type == pygame.KEYUP:
-            if pedal:
-                self._pedal_held.discard(pedal)
+            if pedal and pedal in self._pedal_adjust_held:
+                # Adjust pedal released → stop continuous action
+                del self._pedal_adjust_held[pedal]
             if event.key in (pygame.K_KP4, pygame.K_KP5, pygame.K_KP6):
                 self._npad_held.discard(event.key)
             action = self._keymap.get(event.key)
             if action is not None:
                 self._held.discard(action)
+
+    def _clear_pedal_adjust(self):
+        """Stop all continuous pedal adjust actions."""
+        self._pedal_adjust_held.clear()
 
     def _determine_combo_action(self, pressed):
         """Determine combo actions based on numpad keys."""
@@ -261,11 +276,9 @@ class InputHandler:
         pressed = pygame.key.get_pressed()
         combo_action = self._determine_combo_action(pressed)
 
-        # Remove all combo actions from self._held
-        for act in [Action.ZOOM_OUT, Action.ZOOM_IN, Action.CALIB_NUDGE_LEFT, Action.CALIB_NUDGE_RIGHT, Action.PEDAL_CENTER_DOWN, Action.PEDAL_CENTER_UP]:
-            self._held.discard(act)
+        # Continuous pedal adjust actions (long-press held pedals)
+        pedal_continuous = set(self._pedal_adjust_held.values())
 
-        # Return combo actions if present, otherwise return held and one-shot actions
         if combo_action:
-            return {combo_action} | one_shot
-        return self._held | one_shot
+            return {combo_action} | one_shot | pedal_continuous
+        return self._held | one_shot | pedal_continuous
