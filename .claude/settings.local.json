@@ -28,7 +28,8 @@
       "Bash(.venv/Scripts/python -c \"import physical_calibration; print\\('OK'\\)\")",
       "Bash(git add *)",
       "Bash(git commit *)",
-      "Bash(python -c \"import ast; ast.parse\\(open\\('physical_calibration.py'\\).read\\(\\)\\); print\\('SYNTAX OK'\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\('physical_calibration.py'\\).read\\(\\)\\); print\\('SYNTAX OK'\\)\")",
+      "Bash(git checkout *)"
     ]
   }
 }
