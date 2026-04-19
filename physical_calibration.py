@@ -9,6 +9,7 @@ Keys: N = next phase  P = prev phase  R = reset aligner  Q/ESC = quit
 """
 from __future__ import annotations
 
+import math
 import sys
 import cv2
 import numpy as np
@@ -40,7 +41,7 @@ def _make_pc_frame(eye_l: np.ndarray, eye_r: np.ndarray) -> np.ndarray:
     return cv2.resize(sbs, (PC_DISPLAY_WIDTH, new_h), interpolation=cv2.INTER_LINEAR)
 
 
-def _poll_keys() -> set[str]:
+def _poll_keys(headset_ok: bool = True) -> set[str]:
     """Poll both OpenCV and Pygame key events. Returns set of action strings."""
     actions: set[str] = set()
     key = cv2.waitKey(1) & 0xFF
@@ -52,18 +53,19 @@ def _poll_keys() -> set[str]:
         actions.add("prev")
     elif key in (ord('r'), ord('R')):
         actions.add("reset")
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            actions.add("quit")
-        elif event.type == pygame.KEYDOWN:
-            if event.key in (pygame.K_q, pygame.K_ESCAPE):
+    if headset_ok:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
                 actions.add("quit")
-            elif event.key == pygame.K_n:
-                actions.add("next")
-            elif event.key == pygame.K_p:
-                actions.add("prev")
-            elif event.key == pygame.K_r:
-                actions.add("reset")
+            elif event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_q, pygame.K_ESCAPE):
+                    actions.add("quit")
+                elif event.key == pygame.K_n:
+                    actions.add("next")
+                elif event.key == pygame.K_p:
+                    actions.add("prev")
+                elif event.key == pygame.K_r:
+                    actions.add("reset")
     return actions
 
 
@@ -88,6 +90,7 @@ def main():
             side="right", name="test-R").start()
     else:
         print("[physcal] Opening cameras…")
+        cam_l = None
         try:
             cam_l = CameraCapture(
                 cfg.cameras.left.index, cfg.cameras.left.width,
@@ -99,6 +102,8 @@ def main():
                 backend=cfg.cameras.backend, name="cam-R").start()
         except RuntimeError as e:
             print(f"[physcal] ERROR: {e}")
+            if cam_l is not None:
+                cam_l.stop()
             sys.exit(1)
 
     aligner = StereoAligner(
@@ -140,6 +145,10 @@ def main():
             if cfg.cameras.right.flip_180:
                 frame_r = cv2.rotate(frame_r, cv2.ROTATE_180)
 
+            # Sharpness measured pre-warp — warp mask erodes borders and skews the metric
+            sharp_l = session.sharpness(frame_l)
+            sharp_r = session.sharpness(frame_r)
+
             if aligner.needs_update():
                 aligner.update(frame_l, frame_r)
             frame_l, frame_r = aligner.warp_pair(frame_l, frame_r)
@@ -149,9 +158,7 @@ def main():
 
             ar = aligner.result
             dy = ar.dy if aligner.has_correction else None
-            dtheta_deg = ar.dtheta * 57.2958 if aligner.has_correction else None
-            sharp_l = session.sharpness(eye_l)
-            sharp_r = session.sharpness(eye_r)
+            dtheta_deg = math.degrees(ar.dtheta) if aligner.has_correction else None
 
             phase = session.phase
             if phase == "focus":
@@ -179,7 +186,7 @@ def main():
                 display.show(sbs)
                 display.tick()
 
-            actions = _poll_keys()
+            actions = _poll_keys(headset_ok)
             if "quit" in actions:
                 break
             if "next" in actions:
