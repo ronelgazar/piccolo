@@ -296,6 +296,8 @@ class PiccoloApp:
             "calibration_phase": self.calibration.phase,
             "nudge_left": self.calibration.nudge_left,
             "nudge_right": self.calibration.nudge_right,
+            "nudge_left_y": self.calibration.nudge_left_y,
+            "nudge_right_y": self.calibration.nudge_right_y,
             "annotations": {
                 "count": self.stream.annotations.count,
                 "show_on_screen": self.stream.annotations.show_on_screen,

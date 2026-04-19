@@ -24,7 +24,11 @@
       "Bash(python -c \"import needle_tracker; print\\('OK'\\)\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\('needle_tracker.py'\\).read\\(\\)\\); print\\('Syntax OK'\\)\")",
       "Bash(.venv/Scripts/python -m pytest tests/test_physical_cal.py::TestPatternRenderer -v)",
-      "Bash(.venv/Scripts/python -m pytest tests/test_physical_cal.py -v)"
+      "Bash(.venv/Scripts/python -m pytest tests/test_physical_cal.py -v)",
+      "Bash(.venv/Scripts/python -c \"import physical_calibration; print\\('OK'\\)\")",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('physical_calibration.py'\\).read\\(\\)\\); print\\('SYNTAX OK'\\)\")"
     ]
   }
 }

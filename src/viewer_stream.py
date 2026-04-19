@@ -193,6 +193,18 @@ _INDEX_HTML = r"""<!DOCTYPE html>
         <button class="ctrl-btn" onclick="sendAction('reset_nudge')">
           Reset Nudge</button>
       </div>
+      <div style="margin-top:10px">
+        <label for="nudge-y-left" style="font-size:12px;">Left eye vertical (px):
+          <span id="nudge-y-left-val">0</span></label>
+        <input type="range" id="nudge-y-left" min="-300" max="300" value="0" step="1"
+               oninput="updateNudgeY('left', this.value)" style="width:100%">
+      </div>
+      <div style="margin-top:6px">
+        <label for="nudge-y-right" style="font-size:12px;">Right eye vertical (px):
+          <span id="nudge-y-right-val">0</span></label>
+        <input type="range" id="nudge-y-right" min="-300" max="300" value="0" step="1"
+               oninput="updateNudgeY('right', this.value)" style="width:100%">
+      </div>
       <div class="status" id="calib-status" style="margin-top:6px;min-height:18px;"></div>
     </div>
 
@@ -262,6 +274,16 @@ function updateAlignment(value) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ offset: parseInt(value) })
+  });
+}
+
+function updateNudgeY(eye, value) {
+  const span = document.getElementById('nudge-y-' + eye + '-val');
+  if (span) span.innerText = value;
+  fetch('/api/nudge_y', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ eye: eye, value: parseInt(value) })
   });
 }
 
@@ -335,8 +357,10 @@ function updateStatus() {
       html += ` &mdash; <span class="val">${d.calibration_phase.toUpperCase()}</span>`;
     }
     if (d.nudge_left !== undefined) {
-      html += `<br>Nudge L: <span class="val">${d.nudge_left}px</span>`;
+      html += `<br>Nudge X  L: <span class="val">${d.nudge_left}px</span>`;
       html += ` &nbsp; R: <span class="val">${d.nudge_right}px</span>`;
+      html += `<br>Nudge Y  L: <span class="val">${d.nudge_left_y ?? 0}px</span>`;
+      html += ` &nbsp; R: <span class="val">${d.nudge_right_y ?? 0}px</span>`;
     }
     el.innerHTML = html;
     // Toggle button styles
@@ -1145,6 +1169,19 @@ class ViewerStream:
             offset = max(-50, min(50, offset))
             server.cfg.alignment_offset = offset
             return jsonify({"ok": True, "offset": offset})
+
+        @app.route("/api/nudge_y", methods=["POST"])
+        def api_nudge_y():
+            """Set per-eye vertical nudge (pixels) to correct physical camera height."""
+            data = request.get_json(silent=True) or {}
+            eye = data.get("eye", "")
+            value = int(data.get("value", 0))
+            value = max(-300, min(300, value))
+            if eye not in ("left", "right"):
+                return jsonify({"ok": False, "error": "eye must be 'left' or 'right'"}), 400
+            if hasattr(server, "app") and hasattr(server.app, "calibration"):
+                server.app.calibration.set_nudge_y(eye, value)
+            return jsonify({"ok": True, "eye": eye, "value": value})
 
         @app.route("/api/zoom_center", methods=["POST"])
         def api_zoom_center():

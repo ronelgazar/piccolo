@@ -52,6 +52,9 @@ class CalibrationOverlay:
         # Persistent per-eye horizontal offsets (survive calibration exit)
         self.nudge_left: int = 0    # positive = shift image rightward
         self.nudge_right: int = 0
+        # Persistent per-eye vertical offsets (positive = shift image downward)
+        self.nudge_left_y: int = 0
+        self.nudge_right_y: int = 0
 
     # ------------------------------------------------------------------
     # Control
@@ -107,33 +110,56 @@ class CalibrationOverlay:
             self.nudge_right += self.NUDGE_STEP
 
     def reset_nudge(self):
-        """Reset both nudge offsets to zero."""
+        """Reset all nudge offsets (X and Y) to zero."""
         self.nudge_left = 0
         self.nudge_right = 0
+        self.nudge_left_y = 0
+        self.nudge_right_y = 0
+
+    def set_nudge_y(self, eye: str, value: int) -> None:
+        """Set the vertical nudge offset (in pixels) for one eye.
+
+        Positive shifts image down; negative shifts up.  Used by the
+        web UI to correct physical camera height misalignment.
+        """
+        if eye == "left":
+            self.nudge_left_y = int(value)
+        elif eye == "right":
+            self.nudge_right_y = int(value)
 
     # ------------------------------------------------------------------
     # Per-frame application
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _roll_and_zero(img: np.ndarray, shift: int, axis: int) -> np.ndarray:
+        """Roll ``img`` by ``shift`` along ``axis`` and zero the wrapped border."""
+        if shift == 0:
+            return img
+        img = np.roll(img, shift, axis=axis)
+        if axis == 0:
+            if shift > 0:
+                img[:shift, :] = 0
+            else:
+                img[shift:, :] = 0
+        else:
+            if shift > 0:
+                img[:, :shift] = 0
+            else:
+                img[:, shift:] = 0
+        return img
+
     def apply_nudge(self, eye_l: np.ndarray, eye_r: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Apply persistent horizontal nudge offsets to both eye frames.
+        """Apply persistent per-eye nudge offsets (both X and Y) to both frames.
 
         Called every frame (even outside calibration) so the surgeon's
         manual corrections are always active.  Uses ``np.roll`` for
         speed; border pixels are zeroed to avoid wrap artefacts.
         """
-        if self.nudge_left != 0:
-            eye_l = np.roll(eye_l, self.nudge_left, axis=1)
-            if self.nudge_left > 0:
-                eye_l[:, :self.nudge_left] = 0
-            else:
-                eye_l[:, self.nudge_left:] = 0
-        if self.nudge_right != 0:
-            eye_r = np.roll(eye_r, self.nudge_right, axis=1)
-            if self.nudge_right > 0:
-                eye_r[:, :self.nudge_right] = 0
-            else:
-                eye_r[:, self.nudge_right:] = 0
+        eye_l = self._roll_and_zero(eye_l, self.nudge_left, axis=1)
+        eye_r = self._roll_and_zero(eye_r, self.nudge_right, axis=1)
+        eye_l = self._roll_and_zero(eye_l, self.nudge_left_y, axis=0)
+        eye_r = self._roll_and_zero(eye_r, self.nudge_right_y, axis=0)
         return eye_l, eye_r
 
     def apply(self, eye_l: np.ndarray, eye_r: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
