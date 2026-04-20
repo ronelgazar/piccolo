@@ -1,11 +1,13 @@
-"""Live tab: SBS preview, zoom-center arrow pad, bottom status strip."""
+"""Live tab: SBS preview, zoom-center arrow pad, annotations, bottom status strip."""
 from __future__ import annotations
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QLabel, QGroupBox,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QStackedLayout, QPushButton,
+    QLabel, QGroupBox,
 )
 
 from .video_widget import VideoWidget
+from .annotation_overlay_widget import AnnotationCanvas
 
 
 class LiveTab(QWidget):
@@ -17,14 +19,21 @@ class LiveTab(QWidget):
         main = QHBoxLayout()
         root.addLayout(main, stretch=1)
 
-        # Preview (left, grows to fill)
-        self.preview = VideoWidget(self)
-        main.addWidget(self.preview, stretch=4)
+        # Preview stack: video + annotation canvas on top
+        preview_wrap = QWidget(self)
+        stack = QStackedLayout(preview_wrap)
+        stack.setStackingMode(QStackedLayout.StackingMode.StackAll)
+        self.preview = VideoWidget(preview_wrap)
+        self.canvas = AnnotationCanvas(preview_wrap)
+        stack.addWidget(self.preview)
+        stack.addWidget(self.canvas)
+        main.addWidget(preview_wrap, stretch=4)
 
         # Side panel (right)
         side = QVBoxLayout()
         main.addLayout(side, stretch=1)
         side.addWidget(self._make_zoom_pad())
+        side.addWidget(self._make_annotation_group())
         side.addStretch(1)
 
         # Status strip (bottom)
@@ -55,6 +64,18 @@ class LiveTab(QWidget):
         btn_down.clicked.connect(lambda: self._nudge_center_y(+1))
         btn_left.clicked.connect(lambda: self._nudge_center_x(-1))
         btn_right.clicked.connect(lambda: self._nudge_center_x(+1))
+        return box
+
+    def _make_annotation_group(self) -> QGroupBox:
+        box = QGroupBox("Annotations", self)
+        lay = QVBoxLayout(box)
+        row = QHBoxLayout()
+        btn_undo = QPushButton("Undo")
+        btn_clear = QPushButton("Clear")
+        btn_undo.clicked.connect(self.canvas.undo)
+        btn_clear.clicked.connect(self.canvas.clear)
+        row.addWidget(btn_undo); row.addWidget(btn_clear)
+        lay.addLayout(row)
         return box
 
     def _make_status_strip(self) -> QWidget:
