@@ -12,7 +12,9 @@ def qapp():
 
 def test_main_window_opens(qapp):
     cfg = load_config()
-    w = MainWindow(cfg)
+    cfg.cameras.test_mode = True
+    # Don't start the pipeline worker in tests — we only verify the UI shell
+    w = MainWindow(cfg, start_worker=False)
     w.show()
     assert w.isVisible()
     central = w.centralWidget()

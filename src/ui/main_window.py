@@ -1,23 +1,25 @@
-"""Main Qt window: tabbed assistant UI."""
+"""Main Qt window: tabbed assistant UI + pipeline worker."""
 from __future__ import annotations
 
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import QMainWindow, QTabWidget
 
 from ..config import PiccoloCfg
 from .live_tab import LiveTab
 from .calibration_tab import CalibrationTab
 from .settings_tab import SettingsTab
+from .pipeline_worker import PipelineWorker
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, cfg: PiccoloCfg):
+    def __init__(self, cfg: PiccoloCfg, start_worker: bool = True):
         super().__init__()
         self.cfg = cfg
         self.setWindowTitle("Piccolo")
         self.resize(1280, 800)
 
-        # Worker is None until Task 4; tab stubs tolerate None.
-        self.worker = None
+        self.worker = PipelineWorker(cfg, self)
 
         tabs = QTabWidget(self)
         self.live_tab = LiveTab(self.worker, self)
@@ -27,3 +29,29 @@ class MainWindow(QMainWindow):
         tabs.addTab(self.calibration_tab, "Calibration")
         tabs.addTab(self.settings_tab, "Settings")
         self.setCentralWidget(tabs)
+
+        if start_worker:
+            self.worker.start()
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if not event.isAutoRepeat():
+            self.worker.input.on_key_down(self._qt_key_name(event))
+        super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event: QKeyEvent) -> None:
+        if not event.isAutoRepeat():
+            self.worker.input.on_key_up(self._qt_key_name(event))
+        super().keyReleaseEvent(event)
+
+    @staticmethod
+    def _qt_key_name(event: QKeyEvent) -> str:
+        txt = event.text().lower()
+        if txt and txt.isprintable() and len(txt) == 1:
+            return txt
+        key = event.key()
+        return Qt.Key(key).name.removeprefix("Key_").lower() if key else ""
+
+    def closeEvent(self, event) -> None:
+        if self.worker.isRunning():
+            self.worker.stop()
+        super().closeEvent(event)
