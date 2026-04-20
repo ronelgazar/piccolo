@@ -152,6 +152,60 @@ docs/
 
 ---
 
+## Calibration Cleanup
+
+The existing codebase has accumulated several redundant or abandoned calibration/input paths. The Qt rewrite removes them so there is exactly **one** code path for each concept.
+
+**To remove from `src/input_handler.py`:**
+- `_handle_pedal_logic` (never called, uses F1/F2/F3 for a different pedal model than the `a`/`b`/`c` toggle system we use now).
+- Legacy numpad combo support (`_npad_held`, `_determine_combo_action`, `_get_first_and_second_keys`, `_map_combo_to_action`, and the call sites in `poll()` and `_handle_key_event`).
+- Unused action enum values: `PEDAL_MODE_TOGGLE`, `PEDAL_MODE_CENTER_X`, `PEDAL_MODE_CENTER_Y`, `PEDAL_ZOOM_IN`, `PEDAL_ZOOM_OUT` (duplicated by `ZOOM_IN`/`ZOOM_OUT`).
+- Corresponding entries in the `_build_keymap` mapping.
+- `_CONTINUOUS` entries no longer referenced.
+
+**To remove as part of deleting the web UI:**
+- Duplicated `fused3d-slider-group` HTML block in `src/viewer_stream.py` (appears twice — lines 220 and 569 on master).
+
+**Post-cleanup canonical calibration list:**
+
+| Concept | Module | Scope |
+|---|---|---|
+| Per-eye X and Y nudge | `src/calibration.py` `CalibrationOverlay` | Manual, persistent, corrects physical mount offset |
+| Physical alignment wizard | `src/physical_cal.py` + `src/ui/calibration_tab.py` | Interactive, pre-op, guides physical camera positioning |
+| Automatic stereo alignment | `src/stereo_align.py` `StereoAligner` | Continuous, feature-based, corrects residual rotation + vertical offset |
+
+Each has a distinct purpose (manual mechanical / physical guidance / automatic drift correction). None is removed — the work here is deleting the broken duplicates and the pedal paths that were half-removed.
+
+---
+
+## Persistent Calibration State
+
+Calibration values are currently in-memory only — they reset every launch. The Qt app persists them to `config.yaml` and restores on startup.
+
+**New `config.yaml` section:**
+```yaml
+calibration_state:
+  nudge_left_x: 0        # pixels, positive = shift image right
+  nudge_right_x: 0
+  nudge_left_y: 0        # pixels, positive = shift image down
+  nudge_right_y: 0
+  convergence_offset: 0  # horizontal pixel shift between eyes
+  joint_zoom_center: 50  # percent 0-100
+  joint_zoom_center_y: 50
+```
+
+**Save policy:**
+- Values write to disk on change (slider release / spinner commit) via a small `ConfigPersister` helper. No unsaved-state footgun; every change is durable.
+- "Reset to defaults" button on the Settings / Calibration tabs clears the section back to zeros and re-saves.
+
+**Load policy:**
+- On startup, `load_config()` populates `CalibrationOverlay` and `StereoProcessor` from `calibration_state` before the pipeline worker starts.
+- If the section is missing (old config file), all values default to zero — identical to today's behavior.
+
+This replaces the current "remember to write down your nudge offsets" workflow.
+
+---
+
 ## Error Handling
 
 - **Camera open failure:** dialog on the Live tab ("Camera X failed to open — check USB connection"). App stays on Settings tab so indices can be fixed. No process exit.
