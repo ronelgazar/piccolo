@@ -10,6 +10,7 @@ from .live_tab import LiveTab
 from .calibration_tab import CalibrationTab
 from .settings_tab import SettingsTab
 from .pipeline_worker import PipelineWorker
+from .goovis_window import GoovisWindow
 
 
 class MainWindow(QMainWindow):
@@ -29,6 +30,14 @@ class MainWindow(QMainWindow):
         tabs.addTab(self.calibration_tab, "Calibration")
         tabs.addTab(self.settings_tab, "Settings")
         self.setCentralWidget(tabs)
+
+        # Goovis output window (optional)
+        self.goovis: GoovisWindow | None = GoovisWindow(cfg.display, self)
+        if self.goovis.show_on_goovis():
+            self.worker.frame_ready.connect(self.goovis.video.set_frame)
+        else:
+            self.goovis.deleteLater()
+            self.goovis = None
 
         if start_worker:
             self.worker.start()
@@ -52,6 +61,8 @@ class MainWindow(QMainWindow):
         return Qt.Key(key).name.removeprefix("Key_").lower() if key else ""
 
     def closeEvent(self, event) -> None:
+        if self.goovis is not None:
+            self.goovis.close()
         if self.worker.isRunning():
             self.worker.stop()
         super().closeEvent(event)
