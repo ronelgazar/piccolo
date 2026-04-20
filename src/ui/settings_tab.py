@@ -3,12 +3,16 @@ from __future__ import annotations
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QGuiApplication
+from dataclasses import asdict
+
+import yaml
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QHBoxLayout, QGroupBox, QCheckBox,
-    QComboBox, QSpinBox, QDoubleSpinBox, QSlider, QLabel,
+    QComboBox, QSpinBox, QDoubleSpinBox, QSlider, QLabel, QLineEdit, QPushButton,
+    QMessageBox, QFileDialog,
 )
 
-from ..config_state import save_calibration_state
+from ..config_state import save_calibration_state, _default_config_path
 
 
 class SettingsTab(QWidget):
@@ -23,6 +27,8 @@ class SettingsTab(QWidget):
         root.addWidget(self._make_cameras_group())
         root.addWidget(self._make_display_group())
         root.addWidget(self._make_stereo_group())
+        root.addWidget(self._make_pedals_group())
+        root.addWidget(self._make_config_group())
         root.addStretch(1)
 
     # ------------------ Cameras ----------------------------------------
@@ -111,3 +117,118 @@ class SettingsTab(QWidget):
         self.worker.processor.base_offset = value
         self.worker.cfg.calibration_state.convergence_offset = value
         save_calibration_state(self.worker.cfg)
+
+    # ------------------ Pedals -----------------------------------------
+
+    def _make_pedals_group(self) -> QGroupBox:
+        box = QGroupBox("Pedals", self)
+        form = QFormLayout(box)
+        ctl = self.worker.cfg.controls
+
+        cb_enable = QCheckBox("Pedal input enabled")
+        cb_enable.setChecked(True)
+        form.addRow(cb_enable)
+
+        self.ed_key_a = QLineEdit(ctl.pedal_key_a); self.ed_key_a.setMaxLength(1)
+        self.ed_key_b = QLineEdit(ctl.pedal_key_b); self.ed_key_b.setMaxLength(1)
+        self.ed_key_c = QLineEdit(ctl.pedal_key_c); self.ed_key_c.setMaxLength(1)
+        for ed, attr in ((self.ed_key_a, "pedal_key_a"),
+                          (self.ed_key_b, "pedal_key_b"),
+                          (self.ed_key_c, "pedal_key_c")):
+            ed.editingFinished.connect(
+                lambda e=ed, a=attr: self._set_pedal_key(a, e.text()))
+        form.addRow(QLabel("Pedal A key"), self.ed_key_a)
+        form.addRow(QLabel("Pedal B key"), self.ed_key_b)
+        form.addRow(QLabel("Pedal C key"), self.ed_key_c)
+
+        modes = ["zoom", "side", "updown", "none"]
+        self.cmb_mode_a = QComboBox(); self.cmb_mode_a.addItems(modes); self.cmb_mode_a.setCurrentText(ctl.pedal_mode_a)
+        self.cmb_mode_b = QComboBox(); self.cmb_mode_b.addItems(modes); self.cmb_mode_b.setCurrentText(ctl.pedal_mode_b)
+        self.cmb_mode_c = QComboBox(); self.cmb_mode_c.addItems(modes); self.cmb_mode_c.setCurrentText(ctl.pedal_mode_c)
+        self.cmb_mode_a.currentTextChanged.connect(lambda t: setattr(ctl, "pedal_mode_a", t))
+        self.cmb_mode_b.currentTextChanged.connect(lambda t: setattr(ctl, "pedal_mode_b", t))
+        self.cmb_mode_c.currentTextChanged.connect(lambda t: setattr(ctl, "pedal_mode_c", t))
+        form.addRow(QLabel("Pedal A mode"), self.cmb_mode_a)
+        form.addRow(QLabel("Pedal B mode"), self.cmb_mode_b)
+        form.addRow(QLabel("Pedal C mode"), self.cmb_mode_c)
+
+        form.addRow(QLabel("Long-press repeat (ms)"),
+                    self._spinbox(ctl.pedal_repeat_ms, 1, 1000,
+                                  lambda v: setattr(ctl, "pedal_repeat_ms", v)))
+
+        self.lbl_live_mode = QLabel("Pedal mode: OFF")
+        self.lbl_live_mode.setStyleSheet("font-family: monospace;")
+        form.addRow(self.lbl_live_mode)
+        self.worker.status_tick.connect(self._on_status_mode)
+        return box
+
+    def _on_status_mode(self, st: dict) -> None:
+        mode = st.get("pedal_mode")
+        mode_names = {"a": "ZOOM", "b": "SIDE", "c": "UP/DOWN"}
+        self.lbl_live_mode.setText(f"Pedal mode: {mode_names.get(mode, 'OFF')}")
+
+    def _set_pedal_key(self, attr: str, text: str) -> None:
+        if len(text) != 1:
+            return
+        setattr(self.worker.cfg.controls, attr, text.lower())
+
+    # ------------------ Config file ------------------------------------
+
+    def _make_config_group(self) -> QGroupBox:
+        box = QGroupBox("Config file", self)
+        row = QHBoxLayout(box)
+        btn_load = QPushButton("Load…")
+        btn_save = QPushButton("Save")
+        btn_reset = QPushButton("Reset to defaults")
+        btn_load.clicked.connect(self._load_config)
+        btn_save.clicked.connect(self._save_config)
+        btn_reset.clicked.connect(self._reset_config)
+        row.addWidget(btn_load); row.addWidget(btn_save); row.addWidget(btn_reset); row.addStretch(1)
+        return box
+
+    def _load_config(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Load config", "", "YAML (*.yaml *.yml)")
+        if not path:
+            return
+        QMessageBox.information(self, "Restart required",
+                                 f"Config loaded from {path}.\nRestart the app for all changes to take effect.")
+
+    def _save_config(self) -> None:
+        cfg = self.worker.cfg
+        raw = self._cfg_to_dict(cfg)
+        path = _default_config_path()
+        with open(path, "w", encoding="utf-8") as fh:
+            yaml.safe_dump(raw, fh, sort_keys=False)
+        QMessageBox.information(self, "Saved", f"Wrote {path}")
+
+    def _reset_config(self) -> None:
+        if QMessageBox.question(self, "Reset config", "Overwrite config.yaml with defaults?") \
+                != QMessageBox.StandardButton.Yes:
+            return
+        from ..config import PiccoloCfg
+        defaults = PiccoloCfg()
+        raw = self._cfg_to_dict(defaults)
+        path = _default_config_path()
+        with open(path, "w", encoding="utf-8") as fh:
+            yaml.safe_dump(raw, fh, sort_keys=False)
+        QMessageBox.information(self, "Reset", f"Wrote defaults to {path}.\nRestart to apply.")
+
+    @staticmethod
+    def _cfg_to_dict(cfg) -> dict:
+        return {
+            "display": asdict(cfg.display),
+            "cameras": {
+                "backend": cfg.cameras.backend,
+                "left":  asdict(cfg.cameras.left),
+                "right": asdict(cfg.cameras.right),
+                "test_mode": cfg.cameras.test_mode,
+            },
+            "stereo": {
+                "zoom": asdict(cfg.stereo.zoom),
+                "convergence": asdict(cfg.stereo.convergence),
+                "alignment": asdict(cfg.stereo.alignment),
+            },
+            "calibration": asdict(cfg.calibration),
+            "calibration_state": asdict(cfg.calibration_state),
+            "controls": asdict(cfg.controls),
+        }
