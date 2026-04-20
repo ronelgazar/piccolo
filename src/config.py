@@ -93,7 +93,7 @@ class ControlsCfg:
     converge_in: str = "RIGHTBRACKET"
     converge_out: str = "LEFTBRACKET"
     toggle_calibration: str = "c"
-    toggle_alignment: str = "a"
+    toggle_alignment: str = "m"
     calib_next: str = "n"
     calib_nudge_left: str = "LEFT"
     calib_nudge_right: str = "RIGHT"
