@@ -1,16 +1,13 @@
 # Piccolo – Stereoscopic Surgery Display
 opencv-python>=4.8
 numpy>=1.24
-flask>=3.0
 pyyaml>=6.0
 screeninfo>=0.8
 Pillow>=10.0
-python-bidi>=0.6
+PyQt6>=6.6
 
 # --- Raspberry Pi only (uncomment when deploying on RPi) ---
 # picamera2>=0.3
 
-pygame>=2.5
-PyQt6>=6.6
 pytest>=8.0       # dev only — test runner
 pytest-qt>=4.3    # dev only — Qt widget smoke tests
