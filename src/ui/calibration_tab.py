@@ -29,7 +29,7 @@ class CalibrationTab(QWidget):
         root.addWidget(self._make_wizard_group(), stretch=1)
 
         if worker is not None:
-            worker.frame_ready.connect(self._on_frame_for_wizard)
+            worker.sbs_frame_ready.connect(self._on_frame_for_wizard)
             worker.status_tick.connect(self._on_status_for_wizard)
 
     # ------------------ Nudge sliders ----------------------------------
@@ -127,7 +127,11 @@ class CalibrationTab(QWidget):
         self._latest_status = st
 
     @pyqtSlot(object)
-    def _on_frame_for_wizard(self, _qimg: QImage) -> None:
+    def _on_frame_for_wizard(self, sbs: np.ndarray) -> None:
+        # Skip work entirely if this tab isn't visible — avoids wasting CPU
+        # re-processing camera frames while the user is on Live or Settings.
+        if not self.isVisible():
+            return
         if self.worker is None:
             return
         cam_l = self.worker.cam_l
@@ -162,7 +166,7 @@ class CalibrationTab(QWidget):
             self.renderer.render_rotation(eye_l, dtheta_deg)
             self.renderer.render_rotation(eye_r, dtheta_deg)
         sbs = np.concatenate([eye_l, eye_r], axis=1)
-        self.wizard_preview.set_frame(ndarray_to_qimage(sbs))
+        self.wizard_preview.set_sbs_frame(sbs)
         self._update_wizard_readout(sharp_l, sharp_r, dy, dtheta_deg)
 
     def _update_wizard_readout(self, sl, sr, dy, dt):

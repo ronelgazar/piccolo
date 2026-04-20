@@ -23,7 +23,7 @@ from .qt_helpers import ndarray_to_qimage
 class PipelineWorker(QThread):
     """Long-running backend thread."""
 
-    frame_ready = pyqtSignal(object)            # QImage — processed SBS
+    sbs_frame_ready = pyqtSignal(object)        # np.ndarray — processed SBS
     status_tick = pyqtSignal(dict)              # FPS, alignment, pedal mode
     error = pyqtSignal(str)
 
@@ -57,6 +57,10 @@ class PipelineWorker(QThread):
         self.cam_l = None
         self.cam_r = None
         self._fps_hist: list[float] = []
+        # Throttle GUI-facing emits to save CPU (GUI conversion + scaling
+        # is expensive at full camera rate).  ~33 ms = ~30 FPS display.
+        self._last_emit_t: float = 0.0
+        self._emit_interval: float = 1.0 / 30.0
 
     # ------------------------------------------------------------------
 
@@ -124,8 +128,11 @@ class PipelineWorker(QThread):
         sbs[:, :self.processor.eye_w] = eye_l
         sbs[:, self.processor.eye_w:] = eye_r
 
-        self.frame_ready.emit(ndarray_to_qimage(sbs))
-        self._emit_status()
+        now = time.perf_counter()
+        if now - self._last_emit_t >= self._emit_interval:
+            self.sbs_frame_ready.emit(sbs)
+            self._emit_status()
+            self._last_emit_t = now
 
     def _emit_status(self) -> None:
         avg_dt = sum(self._fps_hist) / len(self._fps_hist) if self._fps_hist else 0.016

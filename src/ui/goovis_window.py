@@ -26,26 +26,42 @@ class GoovisWindow(QWidget):
 
         Returns True if a matching screen was found and the window shown.
         """
+        _log_screens()
         screen = _find_goovis_screen(self.cfg)
         if screen is None:
+            print("[goovis] No secondary monitor detected — headset output disabled.")
             return False
         geom = screen.geometry()
+        print(f"[goovis] Using monitor: {screen.name()!r} {geom.width()}x{geom.height()} @ ({geom.x()},{geom.y()})")
         self.move(geom.x(), geom.y())
         self.resize(geom.width(), geom.height())
         self.showFullScreen()
         return True
 
 
+def _log_screens() -> None:
+    screens = QGuiApplication.screens()
+    primary = QGuiApplication.primaryScreen()
+    print(f"[goovis] Detected {len(screens)} monitor(s):")
+    for i, s in enumerate(screens):
+        g = s.geometry()
+        is_primary = " (primary)" if s is primary else ""
+        print(f"  [{i}] {s.name()!r}  {g.width()}x{g.height()} @ ({g.x()},{g.y()}){is_primary}")
+
+
 def _find_goovis_screen(cfg: DisplayCfg) -> QScreen | None:
     screens = QGuiApplication.screens()
+    # Explicit integer monitor index wins
     if isinstance(cfg.monitor, int) and 0 <= cfg.monitor < len(screens):
         return screens[cfg.monitor]
+    # Name-based auto-detect (preferred)
     for s in screens:
         name = s.name().upper()
         if "GOOVIS" in name or "NED" in name:
             return s
+    # Fallback: any non-primary display
     primary = QGuiApplication.primaryScreen()
     for s in screens:
-        if s is not primary and s.geometry().width() == 1920 and s.geometry().height() == 1080:
+        if s is not primary:
             return s
     return None
