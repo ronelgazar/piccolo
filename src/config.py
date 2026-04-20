@@ -78,6 +78,18 @@ class CalibrationCfg:
 
 
 @dataclass
+class CalibrationStateCfg:
+    """Persistent calibration state — saved to config.yaml on change."""
+    nudge_left_x: int = 0
+    nudge_right_x: int = 0
+    nudge_left_y: int = 0
+    nudge_right_y: int = 0
+    convergence_offset: int = 0
+    joint_zoom_center: int = 50
+    joint_zoom_center_y: int = 50
+
+
+@dataclass
 class DisplayCfg:
     width: int = 1920
     height: int = 1080
@@ -99,6 +111,14 @@ class ControlsCfg:
     calib_nudge_right: str = "RIGHT"
     reset: str = "r"
     quit: str = "ESCAPE"
+    # Pedal bindings
+    pedal_key_a: str = "a"
+    pedal_key_b: str = "b"
+    pedal_key_c: str = "c"
+    pedal_mode_a: str = "zoom"        # "zoom" | "side" | "updown" | "none"
+    pedal_mode_b: str = "side"
+    pedal_mode_c: str = "updown"
+    pedal_repeat_ms: int = 100
 
 
 @dataclass
@@ -115,6 +135,7 @@ class PiccoloCfg:
     cameras: CamerasCfg = field(default_factory=CamerasCfg)
     stereo: StereoCfg = field(default_factory=StereoCfg)
     calibration: CalibrationCfg = field(default_factory=CalibrationCfg)
+    calibration_state: CalibrationStateCfg = field(default_factory=CalibrationStateCfg)
     controls: ControlsCfg = field(default_factory=ControlsCfg)
     stream: StreamCfg = field(default_factory=StreamCfg)
 
