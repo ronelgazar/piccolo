@@ -17,6 +17,7 @@ class MainWindow(QMainWindow):
     def __init__(self, cfg: PiccoloCfg, start_worker: bool = True):
         super().__init__()
         self.cfg = cfg
+        self._overlay_to_goovis = False
         self.setWindowTitle("Piccolo")
         self.resize(1280, 800)
 
@@ -32,9 +33,11 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(tabs)
 
         # Goovis output window (optional)
-        self.goovis: GoovisWindow | None = GoovisWindow(cfg.display, self)
+        self.goovis: GoovisWindow | None = GoovisWindow(cfg.display)
         if self.goovis.show_on_goovis():
-            self.worker.frame_ready.connect(self.goovis.video.set_frame)
+            self.worker.sbs_qimage_ready.connect(self._on_goovis_worker_frame)
+            self.calibration_tab.overlay_mode_changed.connect(self._on_overlay_mode_changed)
+            self.calibration_tab.overlay_frame_ready.connect(self._on_goovis_overlay_frame)
         else:
             self.goovis.deleteLater()
             self.goovis = None
@@ -66,3 +69,16 @@ class MainWindow(QMainWindow):
         if self.worker.isRunning():
             self.worker.stop()
         super().closeEvent(event)
+
+    def _on_overlay_mode_changed(self, active: bool) -> None:
+        self._overlay_to_goovis = active
+
+    def _on_goovis_worker_frame(self, image) -> None:
+        if self.goovis is None or self._overlay_to_goovis:
+            return
+        self.goovis.video.set_frame(image)
+
+    def _on_goovis_overlay_frame(self, image) -> None:
+        if self.goovis is None or not self._overlay_to_goovis:
+            return
+        self.goovis.video.set_frame(image)

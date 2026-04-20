@@ -5,8 +5,10 @@ sys.stdout.reconfigure(line_buffering=True)
 from src.config import load_config
 from src.camera import CameraCapture
 from src.stereo_processor import StereoProcessor
-from src.display import StereoDisplay
-import pygame
+from src.ui.qt_helpers import qimage_to_ndarray, ndarray_to_qimage
+from PyQt6.QtWidgets import QApplication
+from src.ui.goovis_window import GoovisWindow
+from src.ui.video_widget import VideoWidget
 import numpy as np
 
 cfg = load_config("config.yaml")
@@ -17,9 +19,11 @@ cam_l = CameraCapture(0, 1920, 1080, backend="opencv", name="cam-L").start()
 cam_r = CameraCapture(1, 1920, 1080, backend="opencv", name="cam-R").start()
 time.sleep(1)  # let cameras warm up
 
-proc = StereoProcessor(cfg.stereo, 960, 1080)
-disp = StereoDisplay(cfg.display)
-disp.open()
+
+app = QApplication(sys.argv)
+disp = GoovisWindow(cfg.display)
+disp.show()
+
 
 FRAMES = 120
 WARMUP = 20
@@ -37,20 +41,16 @@ for i in range(FRAMES):
     t1 = time.perf_counter()
 
     if fl is None or fr is None:
-        disp.tick()
-        for ev in pygame.event.get():
-            pass
+        time.sleep(0.005)
         continue
 
     eye_l, eye_r, sbs = proc.process_pair(fl, fr)
     t2 = time.perf_counter()
 
-    disp.show(sbs)
+    disp.video.set_frame(ndarray_to_qimage(sbs))
     t3 = time.perf_counter()
 
-    disp.tick()
-    for ev in pygame.event.get():
-        pass
+    app.processEvents()
 
     dt = (time.perf_counter() - t0) * 1000
     times.append(dt)
@@ -60,7 +60,6 @@ for i in range(FRAMES):
 
 cam_l.stop()
 cam_r.stop()
-disp.close()
 
 if times:
     # Skip warmup frames

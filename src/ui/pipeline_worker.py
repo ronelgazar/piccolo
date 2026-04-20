@@ -24,6 +24,7 @@ class PipelineWorker(QThread):
     """Long-running backend thread."""
 
     sbs_frame_ready = pyqtSignal(object)        # np.ndarray — processed SBS
+    sbs_qimage_ready = pyqtSignal(object)       # QImage — processed SBS
     status_tick = pyqtSignal(dict)              # FPS, alignment, pedal mode
     error = pyqtSignal(str)
 
@@ -130,7 +131,11 @@ class PipelineWorker(QThread):
 
         now = time.perf_counter()
         if now - self._last_emit_t >= self._emit_interval:
-            self.sbs_frame_ready.emit(sbs)
+            # sbs is a reused pre-allocated buffer; emit a snapshot so
+            # UI-thread consumers never read partially-updated pixels.
+            sbs_snapshot = sbs.copy()
+            self.sbs_frame_ready.emit(sbs_snapshot)
+            self.sbs_qimage_ready.emit(ndarray_to_qimage(sbs))
             self._emit_status()
             self._last_emit_t = now
 

@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import cv2
 import numpy as np
-from PyQt6.QtCore import Qt, pyqtSlot
-from PyQt6.QtGui import QImage
+from PyQt6.QtCore import Qt, QTimer, pyqtSlot, pyqtSignal
+from PyQt6.QtGui import QImage, QKeyEvent, QShortcut, QKeySequence
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, QPushButton, QGroupBox,
+    QComboBox, QSpinBox,
 )
 
 from ..config_state import save_calibration_state
@@ -16,16 +17,31 @@ from .video_widget import VideoWidget
 
 
 class CalibrationTab(QWidget):
+    overlay_mode_changed = pyqtSignal(bool)
+    overlay_frame_ready = pyqtSignal(object)  # QImage
+
     def __init__(self, worker, parent=None):
         super().__init__(parent)
         self.worker = worker
         self.session = PhysicalCalSession()
         self.renderer = PatternRenderer()
         self._latest_status: dict = {}
+        self._overlay_active = False
+        self._overlay_master = "left"
+        self._overlay_slave_x = 0
+        self._overlay_slave_y = 0
+        self._overlay_flash_on = True
+        self._overlay_last_sbs: np.ndarray | None = None
+        self._overlay_flash_timer = QTimer(self)
+        self._overlay_flash_timer.timeout.connect(self._toggle_overlay_flash)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._overlay_shortcuts: list[QShortcut] = []
+        self._init_overlay_shortcuts()
 
         root = QVBoxLayout(self)
         root.addWidget(self._make_nudge_group())
         root.addWidget(self._make_reset_row())
+        root.addWidget(self._make_overlay_cal_group())
         root.addWidget(self._make_wizard_group(), stretch=1)
 
         if worker is not None:
@@ -98,6 +114,266 @@ class CalibrationTab(QWidget):
         st.nudge_left_x = st.nudge_right_x = st.nudge_left_y = st.nudge_right_y = 0
         save_calibration_state(self.worker.cfg)
 
+    # ------------------ Overlay/manual calibration --------------------
+
+    def _make_overlay_cal_group(self) -> QGroupBox:
+        box = QGroupBox("Overlay manual calibration", self)
+        lay = QVBoxLayout(box)
+        self.overlay_preview = VideoWidget(box)
+        lay.addWidget(self.overlay_preview, stretch=1)
+
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("Master eye:"))
+        self.master_combo = QComboBox(box)
+        self.master_combo.addItems(["Left (slave: Right)", "Right (slave: Left)"])
+        self.master_combo.currentIndexChanged.connect(self._on_master_changed)
+        controls.addWidget(self.master_combo)
+
+        controls.addSpacing(16)
+        controls.addWidget(QLabel("Flash every (ms):"))
+        self.flash_ms = QSpinBox(box)
+        self.flash_ms.setRange(300, 4000)
+        self.flash_ms.setSingleStep(100)
+        self.flash_ms.setValue(1000)
+        self.flash_ms.valueChanged.connect(self._on_flash_interval_changed)
+        controls.addWidget(self.flash_ms)
+
+        controls.addSpacing(16)
+        controls.addWidget(QLabel("Arrow step (px):"))
+        self.step_px = QSpinBox(box)
+        self.step_px.setRange(1, 20)
+        self.step_px.setValue(2)
+        controls.addWidget(self.step_px)
+        controls.addStretch(1)
+        lay.addLayout(controls)
+
+        buttons = QHBoxLayout()
+        self.btn_overlay_start = QPushButton("Start overlay calibration")
+        self.btn_overlay_start.clicked.connect(self._toggle_overlay_mode)
+        self.btn_overlay_save = QPushButton("Save to sliders")
+        self.btn_overlay_save.clicked.connect(self._save_overlay_calibration)
+        self.btn_overlay_cancel = QPushButton("Cancel")
+        self.btn_overlay_cancel.clicked.connect(self._cancel_overlay_mode)
+        self.btn_overlay_save.setEnabled(False)
+        self.btn_overlay_cancel.setEnabled(False)
+        buttons.addWidget(self.btn_overlay_start)
+        buttons.addWidget(self.btn_overlay_save)
+        buttons.addWidget(self.btn_overlay_cancel)
+        buttons.addStretch(1)
+        self.overlay_hint_lbl = QLabel(
+            "Press Start, then use arrow keys to move the slave image over the master."
+        )
+        self.overlay_hint_lbl.setStyleSheet("font-family: monospace;")
+        buttons.addWidget(self.overlay_hint_lbl)
+        lay.addLayout(buttons)
+        return box
+
+    def _toggle_overlay_mode(self) -> None:
+        if self.worker is None:
+            return
+        if self._overlay_active:
+            self._cancel_overlay_mode()
+            return
+        self._overlay_active = True
+        self._overlay_flash_on = True
+        self._overlay_last_sbs = None
+        self._load_overlay_slave_from_state()
+        self._overlay_flash_timer.start(self.flash_ms.value())
+        self.btn_overlay_start.setText("Stop overlay calibration")
+        self.btn_overlay_save.setEnabled(True)
+        self.btn_overlay_cancel.setEnabled(True)
+        self.overlay_hint_lbl.setText(self._overlay_status_text())
+        self.overlay_mode_changed.emit(True)
+        self.setFocus(Qt.FocusReason.OtherFocusReason)
+        self._refresh_overlay_preview()
+
+    def _cancel_overlay_mode(self) -> None:
+        self._overlay_active = False
+        self._overlay_flash_timer.stop()
+        self.btn_overlay_start.setText("Start overlay calibration")
+        self.btn_overlay_save.setEnabled(False)
+        self.btn_overlay_cancel.setEnabled(False)
+        self.overlay_mode_changed.emit(False)
+        self.overlay_hint_lbl.setText(
+            "Press Start, then use arrow keys to move the slave image over the master."
+        )
+
+    def _save_overlay_calibration(self) -> None:
+        if not self._overlay_active or self.worker is None:
+            return
+        slave = self._slave_eye()
+        if slave == "left":
+            self._set("nudge_left_x", self._overlay_slave_x,
+                      lambda: setattr(self.worker.calibration, "nudge_left", self._overlay_slave_x))
+            self._set("nudge_left_y", self._overlay_slave_y,
+                      lambda: setattr(self.worker.calibration, "nudge_left_y", self._overlay_slave_y))
+            if self.sld_lx is not None:
+                self.sld_lx.setValue(self._overlay_slave_x)
+            if self.sld_ly is not None:
+                self.sld_ly.setValue(self._overlay_slave_y)
+        else:
+            self._set("nudge_right_x", self._overlay_slave_x,
+                      lambda: setattr(self.worker.calibration, "nudge_right", self._overlay_slave_x))
+            self._set("nudge_right_y", self._overlay_slave_y,
+                      lambda: setattr(self.worker.calibration, "nudge_right_y", self._overlay_slave_y))
+            if self.sld_rx is not None:
+                self.sld_rx.setValue(self._overlay_slave_x)
+            if self.sld_ry is not None:
+                self.sld_ry.setValue(self._overlay_slave_y)
+        self._cancel_overlay_mode()
+
+    def _on_master_changed(self, idx: int) -> None:
+        self._overlay_master = "left" if idx == 0 else "right"
+        self._load_overlay_slave_from_state()
+        if self._overlay_active:
+            self.overlay_hint_lbl.setText(self._overlay_status_text())
+
+    def _on_flash_interval_changed(self, ms: int) -> None:
+        if self._overlay_flash_timer.isActive():
+            self._overlay_flash_timer.start(ms)
+
+    def _toggle_overlay_flash(self) -> None:
+        self._overlay_flash_on = not self._overlay_flash_on
+        self._refresh_overlay_preview()
+
+    def _load_overlay_slave_from_state(self) -> None:
+        if self.worker is None:
+            return
+        st = self.worker.cfg.calibration_state
+        if self._slave_eye() == "left":
+            self._overlay_slave_x = st.nudge_left_x
+            self._overlay_slave_y = st.nudge_left_y
+        else:
+            self._overlay_slave_x = st.nudge_right_x
+            self._overlay_slave_y = st.nudge_right_y
+
+    def _slave_eye(self) -> str:
+        return "right" if self._overlay_master == "left" else "left"
+
+    def _overlay_status_text(self) -> str:
+        slave = self._slave_eye().upper()
+        return (
+            f"Master={self._overlay_master.upper()}  Slave={slave}  "
+            f"offset=({self._overlay_slave_x:+d},{self._overlay_slave_y:+d}) px"
+        )
+
+    @staticmethod
+    def _shift_eye(img: np.ndarray, shift_x: int, shift_y: int) -> np.ndarray:
+        if shift_x == 0 and shift_y == 0:
+            return img.copy()
+        out = img.copy()
+        if shift_x != 0:
+            out = np.roll(out, shift_x, axis=1)
+            if shift_x > 0:
+                out[:, :shift_x] = 0
+            else:
+                out[:, shift_x:] = 0
+        if shift_y != 0:
+            out = np.roll(out, shift_y, axis=0)
+            if shift_y > 0:
+                out[:shift_y, :] = 0
+            else:
+                out[shift_y:, :] = 0
+        return out
+
+    def _render_overlay_preview(self, sbs: np.ndarray) -> None:
+        if sbs.ndim != 3 or sbs.shape[2] != 3:
+            return
+        eye_w = sbs.shape[1] // 2
+        left = sbs[:, :eye_w].copy()
+        right = sbs[:, eye_w:].copy()
+        st = self.worker.cfg.calibration_state if self.worker is not None else None
+
+        if self._overlay_master == "left":
+            base_x = st.nudge_right_x if st is not None else 0
+            base_y = st.nudge_right_y if st is not None else 0
+            slave_shifted = self._shift_eye(right, self._overlay_slave_x - base_x, self._overlay_slave_y - base_y)
+            out_left = left
+            out_right = slave_shifted if self._overlay_flash_on else np.zeros_like(slave_shifted)
+        else:
+            base_x = st.nudge_left_x if st is not None else 0
+            base_y = st.nudge_left_y if st is not None else 0
+            slave_shifted = self._shift_eye(left, self._overlay_slave_x - base_x, self._overlay_slave_y - base_y)
+            out_left = slave_shifted if self._overlay_flash_on else np.zeros_like(slave_shifted)
+            out_right = right
+
+        composite = np.concatenate([out_left, out_right], axis=1)
+
+        h, w = composite.shape[:2]
+        # Draw a crosshair in each eye so alignment is easy while preserving native eye layout.
+        for cx in (eye_w // 2, eye_w + eye_w // 2):
+            cv2.line(composite, (cx - 40, h // 2), (cx + 40, h // 2), (255, 255, 255), 1)
+            cv2.line(composite, (cx, h // 2 - 40), (cx, h // 2 + 40), (255, 255, 255), 1)
+        cv2.putText(
+            composite,
+            f"{self._overlay_status_text()}  flash={'ON' if self._overlay_flash_on else 'OFF'}",
+            (10, 28),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (255, 255, 255),
+            1,
+            cv2.LINE_AA,
+        )
+        qimg = ndarray_to_qimage(composite)
+        self.overlay_preview.set_frame(qimg)
+        self.overlay_frame_ready.emit(qimg)
+
+    def _init_overlay_shortcuts(self) -> None:
+        def bind(key: str, handler):
+            sc = QShortcut(QKeySequence(key), self)
+            sc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            sc.activated.connect(handler)
+            self._overlay_shortcuts.append(sc)
+
+        bind("Left", lambda: self._overlay_move(-self.step_px.value(), 0))
+        bind("Right", lambda: self._overlay_move(self.step_px.value(), 0))
+        bind("Up", lambda: self._overlay_move(0, -self.step_px.value()))
+        bind("Down", lambda: self._overlay_move(0, self.step_px.value()))
+        bind("Return", self._save_overlay_calibration)
+        bind("Enter", self._save_overlay_calibration)
+        bind("Escape", self._cancel_overlay_mode)
+
+    def _overlay_move(self, dx: int, dy: int) -> None:
+        if not self._overlay_active:
+            return
+        self._overlay_slave_x += dx
+        self._overlay_slave_y += dy
+        self.overlay_hint_lbl.setText(self._overlay_status_text())
+        self._refresh_overlay_preview()
+
+    def _refresh_overlay_preview(self) -> None:
+        if self._overlay_last_sbs is None or not self._overlay_active:
+            return
+        self._render_overlay_preview(self._overlay_last_sbs)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if not self._overlay_active:
+            super().keyPressEvent(event)
+            return
+        step = self.step_px.value()
+        handled = True
+        if event.key() == Qt.Key.Key_Left:
+            self._overlay_slave_x -= step
+        elif event.key() == Qt.Key.Key_Right:
+            self._overlay_slave_x += step
+        elif event.key() == Qt.Key.Key_Up:
+            self._overlay_slave_y -= step
+        elif event.key() == Qt.Key.Key_Down:
+            self._overlay_slave_y += step
+        elif event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self._save_overlay_calibration()
+        elif event.key() == Qt.Key.Key_Escape:
+            self._cancel_overlay_mode()
+        else:
+            handled = False
+
+        if handled:
+            self.overlay_hint_lbl.setText(self._overlay_status_text())
+            self._refresh_overlay_preview()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     # ------------------ Wizard -----------------------------------------
 
     def _make_wizard_group(self) -> QGroupBox:
@@ -131,6 +407,12 @@ class CalibrationTab(QWidget):
         # Skip work entirely if this tab isn't visible — avoids wasting CPU
         # re-processing camera frames while the user is on Live or Settings.
         if not self.isVisible():
+            return
+        if self._overlay_active:
+            self._overlay_last_sbs = sbs.copy()
+            self._render_overlay_preview(self._overlay_last_sbs)
+            # Overlay mode has its own frame rendering path; skip expensive
+            # wizard camera reads and pattern drawing for responsiveness.
             return
         if self.worker is None:
             return

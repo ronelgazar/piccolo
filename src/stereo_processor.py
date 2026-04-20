@@ -138,8 +138,10 @@ class StereoProcessor:
         roi_w = int(w / self.zoom)
         roi_h = int(h / self.zoom)
 
-        # Centre of the crop (camera optical centre + convergence shift)
-        cx, cy = w // 2, h // 2
+        # Centre of the crop (joint zoom center + convergence shift).
+        # Joint center comes from pedal/UI controls in percent [0,100].
+        cx = int(w * (self.joint_zoom_center / 100.0))
+        cy = int(h * (self.joint_zoom_center_y / 100.0))
         offset = int(round(self.effective_offset))
         if side == "left":
             cx += offset   # shift crop right → convergent

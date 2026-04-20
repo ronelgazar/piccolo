@@ -14,7 +14,9 @@ class GoovisWindow(QWidget):
         super().__init__(parent)
         self.cfg = cfg
         self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
+            Qt.WindowType.Window
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
         )
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -33,9 +35,11 @@ class GoovisWindow(QWidget):
             return False
         geom = screen.geometry()
         print(f"[goovis] Using monitor: {screen.name()!r} {geom.width()}x{geom.height()} @ ({geom.x()},{geom.y()})")
-        self.move(geom.x(), geom.y())
-        self.resize(geom.width(), geom.height())
+        self.setGeometry(geom)
+        self.show()
         self.showFullScreen()
+        self.raise_()
+        self.activateWindow()
         return True
 
 

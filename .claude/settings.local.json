@@ -29,7 +29,18 @@
       "Bash(git add *)",
       "Bash(git commit *)",
       "Bash(python -c \"import ast; ast.parse\\(open\\('physical_calibration.py'\\).read\\(\\)\\); print\\('SYNTAX OK'\\)\")",
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_input_handler.py -v)",
+      "Bash(python -m pytest tests/test_input_handler.py -v)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_config_state.py -v)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_config_state.py tests/test_input_handler.py tests/test_physical_cal.py -v)",
+      "Bash(.venv/Scripts/python -m pip install PyQt6 pytest-qt)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_ui_smoke.py -v)",
+      "Bash(.venv/Scripts/python -m pytest tests/ -v)",
+      "Bash(.venv/Scripts/python -m pytest tests/)",
+      "Bash(.venv/Scripts/python -m pytest tests/ --timeout=15)",
+      "Bash(timeout 60 .venv/Scripts/python -m pytest tests/test_ui_smoke.py -v -s)",
+      "Bash(git rm *)"
     ]
   }
 }

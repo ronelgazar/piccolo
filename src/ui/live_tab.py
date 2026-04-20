@@ -11,13 +11,13 @@ from .annotation_overlay_widget import AnnotationCanvas
 
 
 class LiveTab(QWidget):
-    def __init__(self, worker, parent=None):
+    def __init__(self, worker: PipelineWorker, parent: QWidget | None = None):
         super().__init__(parent)
         self.worker = worker
 
         root = QVBoxLayout(self)
-        main = QHBoxLayout()
-        root.addLayout(main, stretch=1)
+        main_layout = QHBoxLayout()
+        root.addLayout(main_layout, stretch=1)
 
         # Preview stack: video + annotation canvas on top
         preview_wrap = QWidget(self)
@@ -27,11 +27,11 @@ class LiveTab(QWidget):
         self.canvas = AnnotationCanvas(preview_wrap)
         stack.addWidget(self.preview)
         stack.addWidget(self.canvas)
-        main.addWidget(preview_wrap, stretch=4)
+        main_layout.addWidget(preview_wrap, stretch=4)
 
         # Side panel (right)
         side = QVBoxLayout()
-        main.addLayout(side, stretch=1)
+        main_layout.addLayout(side, stretch=1)
         side.addWidget(self._make_zoom_pad())
         side.addWidget(self._make_annotation_group())
         side.addStretch(1)
@@ -41,7 +41,7 @@ class LiveTab(QWidget):
 
         # Wire signals
         if worker is not None:
-            worker.frame_ready.connect(self.preview.set_frame)
+            worker.sbs_qimage_ready.connect(self.preview.set_frame)
             worker.status_tick.connect(self._on_status)
 
     # ------------------------------------------------------------------
