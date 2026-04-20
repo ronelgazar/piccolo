@@ -11,4 +11,6 @@ python-bidi>=0.6
 # picamera2>=0.3
 
 pygame>=2.5
-pytest>=8.0  # dev only — test runner
+PyQt6>=6.6
+pytest>=8.0       # dev only — test runner
+pytest-qt>=4.3    # dev only — Qt widget smoke tests
