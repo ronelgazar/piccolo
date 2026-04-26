@@ -18,6 +18,7 @@ cameras:
     flip_180: true
   test_mode: false
 stereo:
+  aspect_mode: full
   zoom:
     min: 1.0
     max: 5.0
@@ -34,9 +35,9 @@ stereo:
     max_features: 1500
     match_ratio: 0.75
     ransac_thresh: 2.0
-    max_correction_px: 80
-    max_correction_deg: 2.0
-    smoothing: 0.25
+    max_correction_px: 25
+    max_correction_deg: 1.0
+    smoothing: 0.55
     detection_scale: 0.5
 calibration:
   crosshair_color:
@@ -49,9 +50,9 @@ calibration:
   blink_cycles: 3
 calibration_state:
   nudge_left_x: 0
-  nudge_right_x: -56
+  nudge_right_x: -6
   nudge_left_y: 0
-  nudge_right_y: -164
+  nudge_right_y: -236
   convergence_offset: 0
   joint_zoom_center: 50
   joint_zoom_center_y: 50

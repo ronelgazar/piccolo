@@ -133,21 +133,27 @@ class CalibrationOverlay:
 
     @staticmethod
     def _roll_and_zero(img: np.ndarray, shift: int, axis: int) -> np.ndarray:
-        """Roll ``img`` by ``shift`` along ``axis`` and zero the wrapped border."""
+        """Shift ``img`` by ``shift`` along ``axis`` without wrapping pixels."""
         if shift == 0:
             return img
-        img = np.roll(img, shift, axis=axis)
+        out = np.zeros_like(img)
         if axis == 0:
+            h = img.shape[0]
+            if abs(shift) >= h:
+                return out
             if shift > 0:
-                img[:shift, :] = 0
+                out[shift:, :] = img[:h - shift, :]
             else:
-                img[shift:, :] = 0
+                out[:h + shift, :] = img[-shift:, :]
         else:
+            w = img.shape[1]
+            if abs(shift) >= w:
+                return out
             if shift > 0:
-                img[:, :shift] = 0
+                out[:, shift:] = img[:, :w - shift]
             else:
-                img[:, shift:] = 0
-        return img
+                out[:, :w + shift] = img[:, -shift:]
+        return out
 
     def apply_nudge(self, eye_l: np.ndarray, eye_r: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Apply persistent per-eye nudge offsets (both X and Y) to both frames.

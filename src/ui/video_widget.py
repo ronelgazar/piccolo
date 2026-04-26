@@ -22,15 +22,26 @@ class VideoWidget(QLabel):
 
     def set_frame(self, image: QImage) -> None:
         self._last = image
-        self._rescale()
+        if self.isVisible():
+            self._rescale()
 
     def resizeEvent(self, event) -> None:
         self._rescale()
         super().resizeEvent(event)
 
+    def showEvent(self, event) -> None:
+        self._rescale()
+        super().showEvent(event)
+
     def _rescale(self) -> None:
-        if self._last is None:
+        if self._last is None or not self.isVisible():
             return
-        scaled = self._last.scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio,
-                                    Qt.TransformationMode.FastTransformation)
+        if self._last.size() == self.size():
+            self.setPixmap(QPixmap.fromImage(self._last))
+            return
+        scaled = self._last.scaled(
+            self.size(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.FastTransformation,
+        )
         self.setPixmap(QPixmap.fromImage(scaled))

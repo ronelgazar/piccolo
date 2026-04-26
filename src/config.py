@@ -55,9 +55,9 @@ class AlignmentCfg:
     max_features: int = 1500       # SIFT benefits from more features
     match_ratio: float = 0.75      # Lowe's ratio test threshold
     ransac_thresh: float = 2.0     # tighter for Fundamental Matrix
-    max_correction_px: float = 80.0
-    max_correction_deg: float = 2.0
-    smoothing: float = 0.25        # slightly faster convergence
+    max_correction_px: float = 25.0
+    max_correction_deg: float = 1.0
+    smoothing: float = 0.55        # gentle residual cleanup after physical calibration
     detection_scale: float = 0.5
 
 
@@ -66,6 +66,7 @@ class StereoCfg:
     zoom: ZoomCfg = field(default_factory=ZoomCfg)
     convergence: ConvergenceCfg = field(default_factory=ConvergenceCfg)
     alignment: AlignmentCfg = field(default_factory=AlignmentCfg)
+    aspect_mode: str = "full"  # "full" keeps camera FOV; "crop" preserves square geometry in each SBS eye
 
 
 @dataclass

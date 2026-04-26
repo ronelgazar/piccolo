@@ -134,9 +134,13 @@ class StereoProcessor:
         dst   : optional pre-allocated output array to resize into.
         """
         h, w = frame.shape[:2]
-        # ROI dimensions at current zoom
+        # ROI dimensions at current zoom.  In "full" mode we keep the 16:9
+        # camera field of view and let the SBS display path map it into one
+        # eye.  In "crop" mode we preserve pixel geometry inside the SBS eye,
+        # but this necessarily discards horizontal field of view.
         roi_w = int(w / self.zoom)
         roi_h = int(h / self.zoom)
+        roi_w, roi_h = self._adjust_roi_aspect(roi_w, roi_h)
 
         # Centre of the crop (joint zoom center + convergence shift).
         # Joint center comes from pedal/UI controls in percent [0,100].
@@ -202,6 +206,7 @@ class StereoProcessor:
         h, w = frame_l.shape[:2]
         roi_w = int(w / self.zoom)
         roi_h = int(h / self.zoom)
+        roi_w, roi_h = self._adjust_roi_aspect(roi_w, roi_h)
         # Center as percent (0-100)
         cx = int(w * (getattr(self, 'joint_zoom_center', 50) / 100.0))
         cy = int(h * (getattr(self, 'joint_zoom_center_y', 50) / 100.0))
@@ -219,6 +224,17 @@ class StereoProcessor:
         self._eye_l[:] = eye_l
         self._eye_r[:] = eye_r
         return self._eye_l, self._eye_r, self._sbs
+
+    def _adjust_roi_aspect(self, roi_w: int, roi_h: int) -> tuple[int, int]:
+        if getattr(self.cfg, "aspect_mode", "full") != "crop":
+            return roi_w, roi_h
+        out_aspect = self.eye_w / self.eye_h
+        roi_aspect = roi_w / roi_h
+        if roi_aspect > out_aspect:
+            roi_w = max(1, int(round(roi_h * out_aspect)))
+        elif roi_aspect < out_aspect:
+            roi_h = max(1, int(round(roi_w / out_aspect)))
+        return roi_w, roi_h
 
     def smooth_zoom_transition(self, target_zoom: float, steps: int = 10):
         """Smoothly transition to the target zoom level in defined steps."""

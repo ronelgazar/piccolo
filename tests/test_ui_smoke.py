@@ -22,4 +22,9 @@ def test_main_window_opens(qapp):
     assert central.tabText(0) == "Live"
     assert central.tabText(1) == "Calibration"
     assert central.tabText(2) == "Settings"
+    assert w.worker.raw_frame_requested is False
+    central.setCurrentIndex(1)
+    assert w.worker.raw_frame_requested is True
+    central.setCurrentIndex(0)
+    assert w.worker.raw_frame_requested is False
     w.close()

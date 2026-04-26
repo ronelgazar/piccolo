@@ -1,6 +1,8 @@
 """Calibration tab: nudge sliders + physical-cal wizard."""
 from __future__ import annotations
 
+import time
+
 import cv2
 import numpy as np
 from PyQt6.QtCore import Qt, QTimer, pyqtSlot, pyqtSignal
@@ -11,21 +13,28 @@ from PyQt6.QtWidgets import (
 )
 
 from ..config_state import save_calibration_state
-from ..physical_cal import PhysicalCalSession, PatternRenderer
+from ..physical_cal import GridPairMetrics, PhysicalCalSession
 from .qt_helpers import ndarray_to_qimage
+from .physical_cal_worker import PhysicalCalResult, PhysicalCalWorker
 from .video_widget import VideoWidget
 
 
 class CalibrationTab(QWidget):
     overlay_mode_changed = pyqtSignal(bool)
     overlay_frame_ready = pyqtSignal(object)  # QImage
+    physical_mode_changed = pyqtSignal(bool)
+    physical_frame_ready = pyqtSignal(object)  # QImage
+    OVERLAY_SLAVE_OPACITY = 0.70
 
     def __init__(self, worker, parent=None):
         super().__init__(parent)
         self.worker = worker
         self.session = PhysicalCalSession()
-        self.renderer = PatternRenderer()
+        self.physical_worker = PhysicalCalWorker(self)
+        self.physical_worker.result_ready.connect(self._on_physical_result)
+        self.physical_worker.start()
         self._latest_status: dict = {}
+        self._physical_active = False
         self._overlay_active = False
         self._overlay_master = "left"
         self._overlay_slave_x = 0
@@ -175,7 +184,10 @@ class CalibrationTab(QWidget):
         if self._overlay_active:
             self._cancel_overlay_mode()
             return
+        if self._physical_active:
+            self._stop_physical_mode()
         self._overlay_active = True
+        self._update_worker_raw_rate()
         self._overlay_flash_on = True
         self._overlay_last_sbs = None
         self._load_overlay_slave_from_state()
@@ -190,6 +202,7 @@ class CalibrationTab(QWidget):
 
     def _cancel_overlay_mode(self) -> None:
         self._overlay_active = False
+        self._update_worker_raw_rate()
         self._overlay_flash_timer.stop()
         self.btn_overlay_start.setText("Start overlay calibration")
         self.btn_overlay_save.setEnabled(False)
@@ -262,20 +275,24 @@ class CalibrationTab(QWidget):
     def _shift_eye(img: np.ndarray, shift_x: int, shift_y: int) -> np.ndarray:
         if shift_x == 0 and shift_y == 0:
             return img.copy()
-        out = img.copy()
-        if shift_x != 0:
-            out = np.roll(out, shift_x, axis=1)
-            if shift_x > 0:
-                out[:, :shift_x] = 0
-            else:
-                out[:, shift_x:] = 0
-        if shift_y != 0:
-            out = np.roll(out, shift_y, axis=0)
-            if shift_y > 0:
-                out[:shift_y, :] = 0
-            else:
-                out[shift_y:, :] = 0
+        out = np.zeros_like(img)
+        h, w = img.shape[:2]
+        src_x0 = max(0, -shift_x)
+        src_x1 = min(w, w - shift_x)
+        dst_x0 = max(0, shift_x)
+        dst_x1 = min(w, w + shift_x)
+        src_y0 = max(0, -shift_y)
+        src_y1 = min(h, h - shift_y)
+        dst_y0 = max(0, shift_y)
+        dst_y1 = min(h, h + shift_y)
+        if src_x0 >= src_x1 or src_y0 >= src_y1:
+            return out
+        out[dst_y0:dst_y1, dst_x0:dst_x1] = img[src_y0:src_y1, src_x0:src_x1]
         return out
+
+    @classmethod
+    def _slave_visible_image(cls, img: np.ndarray) -> np.ndarray:
+        return cv2.convertScaleAbs(img, alpha=cls.OVERLAY_SLAVE_OPACITY, beta=0)
 
     def _render_overlay_preview(self, sbs: np.ndarray) -> None:
         if sbs.ndim != 3 or sbs.shape[2] != 3:
@@ -290,12 +307,12 @@ class CalibrationTab(QWidget):
             base_y = st.nudge_right_y if st is not None else 0
             slave_shifted = self._shift_eye(right, self._overlay_slave_x - base_x, self._overlay_slave_y - base_y)
             out_left = left
-            out_right = slave_shifted if self._overlay_flash_on else np.zeros_like(slave_shifted)
+            out_right = self._slave_visible_image(slave_shifted) if self._overlay_flash_on else np.zeros_like(slave_shifted)
         else:
             base_x = st.nudge_left_x if st is not None else 0
             base_y = st.nudge_left_y if st is not None else 0
             slave_shifted = self._shift_eye(left, self._overlay_slave_x - base_x, self._overlay_slave_y - base_y)
-            out_left = slave_shifted if self._overlay_flash_on else np.zeros_like(slave_shifted)
+            out_left = self._slave_visible_image(slave_shifted) if self._overlay_flash_on else np.zeros_like(slave_shifted)
             out_right = right
 
         composite = np.concatenate([out_left, out_right], axis=1)
@@ -382,14 +399,22 @@ class CalibrationTab(QWidget):
         lay = QVBoxLayout(box)
         self.wizard_preview = VideoWidget(box)
         lay.addWidget(self.wizard_preview, stretch=1)
+        self.wizard_instruction_lbl = QLabel("")
+        self.wizard_instruction_lbl.setWordWrap(True)
+        self.wizard_instruction_lbl.setStyleSheet("font-family: monospace;")
+        lay.addWidget(self.wizard_instruction_lbl)
         btns = QHBoxLayout()
-        self.wizard_phase_lbl = QLabel("Phase: Focus (1/4)")
+        self.wizard_phase_lbl = QLabel("Phase: Brightness (1/5)")
         self.wizard_readout_lbl = QLabel("")
         self.wizard_readout_lbl.setStyleSheet("font-family: monospace;")
+        self.btn_physical_start = QPushButton("Start physical calibration")
+        self.btn_physical_start.clicked.connect(self._toggle_physical_mode)
         self.btn_prev = QPushButton("← Prev")
         self.btn_next = QPushButton("Next →")
         self.btn_prev.clicked.connect(self._wizard_prev)
         self.btn_next.clicked.connect(self._wizard_next)
+        btns.addWidget(self.btn_physical_start)
+        btns.addSpacing(12)
         btns.addWidget(self.btn_prev)
         btns.addWidget(self.btn_next)
         btns.addSpacing(20)
@@ -409,11 +434,11 @@ class CalibrationTab(QWidget):
         # re-processing camera frames while the user is on Live or Settings.
         if not self.isVisible():
             return
-        # Throttle wizard re-render to ~10 FPS (calibration UI doesn't need
-        # smooth video, but pattern overlay drawing + sharpness is heavy).
-        import time as _t
-        now = _t.perf_counter()
-        if now - self._last_wizard_render_t < 0.1:
+        # Grid detection is intentionally slow-path UI work. Keep it low-rate
+        # so the main display/Goovis feed is not starved by calibration.
+        now = time.perf_counter()
+        interval = 0.1 if self._overlay_active else 0.2 if self._physical_active else 1.0
+        if now - self._last_wizard_render_t < interval:
             return
         self._last_wizard_render_t = now
         if self._overlay_active:
@@ -422,54 +447,111 @@ class CalibrationTab(QWidget):
             self._overlay_last_sbs = sbs.copy()
             self._render_overlay_preview(self._overlay_last_sbs)
             return
+        if sbs is None or sbs.ndim != 3 or sbs.shape[2] != 3:
+            return
+        self.physical_worker.submit(sbs, self.session.phase, self._latest_status)
+
+    @pyqtSlot(object)
+    def _on_physical_result(self, result: PhysicalCalResult) -> None:
+        if result.phase != self.session.phase:
+            return
+        self.wizard_preview.set_frame(result.image)
+        if self._physical_active:
+            self.physical_frame_ready.emit(result.image)
+        self._update_wizard_readout(
+            result.sharp_l,
+            result.sharp_r,
+            None,
+            None,
+            result.metrics,
+            result.focus_ok,
+            result.best_l,
+            result.best_r,
+        )
+
+    def stop_background_work(self) -> None:
+        self._stop_physical_mode()
+        self.physical_worker.stop()
+
+    def _toggle_physical_mode(self) -> None:
+        if self._physical_active:
+            self._stop_physical_mode()
+            return
+        self._start_physical_mode()
+
+    def _start_physical_mode(self) -> None:
         if self.worker is None:
             return
-        cam_l = self.worker.cam_l
-        cam_r = self.worker.cam_r
-        if cam_l is None or cam_r is None:
-            return
-        fl = cam_l.read_no_copy()
-        fr = cam_r.read_no_copy()
-        if fl is None or fr is None:
-            return
-        if self.worker.cfg.cameras.left.flip_180:
-            fl = cv2.rotate(fl, cv2.ROTATE_180)
-        if self.worker.cfg.cameras.right.flip_180:
-            fr = cv2.rotate(fr, cv2.ROTATE_180)
-        eye_l = fl.copy()
-        eye_r = fr.copy()
-        phase = self.session.phase
-        dy = self._latest_status.get("dy")
-        dtheta_deg = self._latest_status.get("dtheta_deg")
-        sharp_l = PhysicalCalSession.sharpness(fl)
-        sharp_r = PhysicalCalSession.sharpness(fr)
-        if phase == "focus":
-            self.renderer.render_focus(eye_l, sharp_l)
-            self.renderer.render_focus(eye_r, sharp_r)
-        elif phase == "scale":
-            self.renderer.render_scale(eye_l)
-            self.renderer.render_scale(eye_r)
-        elif phase == "horizontal":
-            self.renderer.render_horizontal(eye_l, dy)
-            self.renderer.render_horizontal(eye_r, dy)
-        elif phase == "rotation":
-            self.renderer.render_rotation(eye_l, dtheta_deg)
-            self.renderer.render_rotation(eye_r, dtheta_deg)
-        sbs = np.concatenate([eye_l, eye_r], axis=1)
-        self.wizard_preview.set_sbs_frame(sbs)
-        self._update_wizard_readout(sharp_l, sharp_r, dy, dtheta_deg)
+        if self._overlay_active:
+            self._cancel_overlay_mode()
+        self._physical_active = True
+        self.btn_physical_start.setText("Stop physical calibration")
+        self.physical_mode_changed.emit(True)
+        self._update_worker_raw_rate()
 
-    def _update_wizard_readout(self, sl, sr, dy, dt):
+    def _stop_physical_mode(self) -> None:
+        if not self._physical_active:
+            return
+        self._physical_active = False
+        self.btn_physical_start.setText("Start physical calibration")
+        self.physical_mode_changed.emit(False)
+        self._update_worker_raw_rate()
+
+    def _update_worker_raw_rate(self) -> None:
+        if self.worker is None:
+            return
+        if self._overlay_active:
+            self.worker.raw_frame_interval = 0.1
+        elif self._physical_active:
+            self.worker.raw_frame_interval = 0.2
+        else:
+            self.worker.raw_frame_interval = 1.0
+
+    def _update_wizard_readout(
+        self,
+        sl,
+        sr,
+        dy,
+        dt,
+        metrics: GridPairMetrics | None = None,
+        focus_ok: bool | None = None,
+        best_l: float | None = None,
+        best_r: float | None = None,
+    ):
         phase = self.session.phase
         self.wizard_phase_lbl.setText(
             f"Phase: {phase.capitalize()} ({self.session.phase_index + 1}/{self.session.total_phases})"
         )
-        if phase == "focus":
-            self.wizard_readout_lbl.setText(f"sharp L={sl:.0f}  R={sr:.0f}")
+        self.wizard_instruction_lbl.setText(_phase_instruction(phase))
+        if phase == "brightness" and metrics is not None:
+            if metrics.left.brightness is None or metrics.right.brightness is None:
+                self.wizard_readout_lbl.setText("grid=--")
+            else:
+                delta = metrics.right.brightness - metrics.left.brightness
+                self.wizard_readout_lbl.setText(
+                    f"{_ok(metrics.brightness_ok())} bright L={metrics.left.brightness:.0f} R={metrics.right.brightness:.0f} d={delta:+.0f}"
+                )
+        elif phase == "focus":
+            peak_txt = ""
+            if best_l is not None and best_r is not None:
+                peak_txt = f" peak L={best_l:.0f} R={best_r:.0f}"
+            self.wizard_readout_lbl.setText(f"{_ok(bool(focus_ok))} sharp L={sl:.0f} R={sr:.0f}{peak_txt}")
+        elif phase == "scale" and metrics is not None:
+            ratio = metrics.zoom_ratio
+            if ratio is None:
+                self.wizard_readout_lbl.setText("grid=--")
+            else:
+                self.wizard_readout_lbl.setText(
+                    f"{_ok(metrics.zoom_ok())} {metrics.zoom_status()} "
+                    f"err={metrics.zoom_error_pct:+.1f}%  "
+                    f"L={metrics.left.square_px:.1f}px R={metrics.right.square_px:.1f}px  {_zoom_hint(metrics)}"
+                )
         elif phase == "horizontal":
-            self.wizard_readout_lbl.setText(f"dy={dy:+.1f}px" if dy is not None else "dy=--")
+            grid_dy = metrics.vertical_delta_px if metrics is not None else None
+            self.wizard_readout_lbl.setText(f"{_ok(metrics.vertical_ok() if metrics else False)} grid dy={grid_dy:+.1f}px" if grid_dy is not None else "grid dy=--")
         elif phase == "rotation":
-            self.wizard_readout_lbl.setText(f"rot={dt:+.2f}°" if dt is not None else "rot=--")
+            grid_rot = metrics.rotation_delta_deg if metrics is not None else None
+            self.wizard_readout_lbl.setText(f"{_ok(metrics.rotation_ok() if metrics else False)} grid rot={grid_rot:+.2f}°" if grid_rot is not None else "grid rot=--")
         else:
             self.wizard_readout_lbl.setText("")
 
@@ -478,3 +560,32 @@ class CalibrationTab(QWidget):
 
     def _wizard_prev(self) -> None:
         self.session.prev_phase()
+
+
+def _ok(value: bool) -> str:
+    return "OK" if value else "ADJUST"
+
+
+def _phase_instruction(phase: str) -> str:
+    if phase == "brightness":
+        return "Brightness: place the printed grid under both cameras and match exposure/brightness with no clipped whites or blacks."
+    if phase == "focus":
+        return "Focus: adjust each lens until sharpness peaks while the grid is detected in both eyes."
+    if phase == "scale":
+        return "Mechanical zoom: adjust lens zoom until detected grid square size is equal in both eyes."
+    if phase == "horizontal":
+        return "Vertical alignment: adjust camera height/tilt until grid vertical offset approaches 0 px."
+    if phase == "rotation":
+        return "Rotation: rotate the camera mounts until grid row-angle difference approaches 0 degrees."
+    return ""
+
+
+def _zoom_hint(metrics: GridPairMetrics) -> str:
+    ratio = metrics.zoom_ratio
+    if ratio is None:
+        return ""
+    if metrics.zoom_ok():
+        return "zoom matched"
+    if ratio > 1.0:
+        return "right larger"
+    return "left larger"

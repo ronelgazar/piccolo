@@ -61,3 +61,36 @@ def test_convergence_still_offsets_left_and_right_crops():
 
     # Positive convergence shifts left-eye crop right and right-eye crop left.
     assert left_eye.mean() > right_eye.mean()
+
+
+def test_process_eye_preserves_output_aspect_before_resize():
+    cfg = StereoCfg()
+    cfg.aspect_mode = "crop"
+    p = StereoProcessor(cfg, eye_width=96, eye_height=108)
+    frame = np.zeros((108, 192, 3), dtype=np.uint8)
+
+    # Draw a 40x40 square centered in the camera frame. If the full 16:9
+    # frame were squeezed into a 8:9 SBS eye, this would become a rectangle.
+    frame[34:74, 76:116] = 255
+
+    out = p.process_eye(frame, "left")
+    mask = out[:, :, 0] > 128
+    ys, xs = np.where(mask)
+    width = xs.max() - xs.min() + 1
+    height = ys.max() - ys.min() + 1
+
+    assert abs(width - height) <= 2
+
+
+def test_process_eye_full_aspect_keeps_camera_width():
+    cfg = StereoCfg()
+    cfg.aspect_mode = "full"
+    p = StereoProcessor(cfg, eye_width=96, eye_height=108)
+    frame = np.zeros((108, 192, 3), dtype=np.uint8)
+
+    frame[:, :20] = 255
+    out = p.process_eye(frame, "left")
+
+    # Full mode uses the full 16:9 camera frame, so the left edge remains
+    # visible instead of being cropped away for square-pixel geometry.
+    assert out[:, 0].mean() > 0

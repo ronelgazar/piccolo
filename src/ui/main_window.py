@@ -18,19 +18,22 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.cfg = cfg
         self._overlay_to_goovis = False
+        self._physical_to_goovis = False
         self.setWindowTitle("Piccolo")
         self.resize(1280, 800)
 
         self.worker = PipelineWorker(cfg, self)
 
-        tabs = QTabWidget(self)
+        self.tabs = QTabWidget(self)
         self.live_tab = LiveTab(self.worker, self)
         self.calibration_tab = CalibrationTab(self.worker, self)
         self.settings_tab = SettingsTab(self.worker, self)
-        tabs.addTab(self.live_tab, "Live")
-        tabs.addTab(self.calibration_tab, "Calibration")
-        tabs.addTab(self.settings_tab, "Settings")
-        self.setCentralWidget(tabs)
+        self.tabs.addTab(self.live_tab, "Live")
+        self.tabs.addTab(self.calibration_tab, "Calibration")
+        self.tabs.addTab(self.settings_tab, "Settings")
+        self.tabs.currentChanged.connect(self._on_tab_changed)
+        self.setCentralWidget(self.tabs)
+        self._on_tab_changed(self.tabs.currentIndex())
 
         # Goovis output window (optional)
         self.goovis: GoovisWindow | None = GoovisWindow(cfg.display)
@@ -40,6 +43,10 @@ class MainWindow(QMainWindow):
                 self.calibration_tab.overlay_mode_changed.connect(self._on_overlay_mode_changed)
             if hasattr(self.calibration_tab, "overlay_frame_ready"):
                 self.calibration_tab.overlay_frame_ready.connect(self._on_goovis_overlay_frame)
+            if hasattr(self.calibration_tab, "physical_mode_changed"):
+                self.calibration_tab.physical_mode_changed.connect(self._on_physical_mode_changed)
+            if hasattr(self.calibration_tab, "physical_frame_ready"):
+                self.calibration_tab.physical_frame_ready.connect(self._on_goovis_physical_frame)
         else:
             self.goovis.deleteLater()
             self.goovis = None
@@ -68,6 +75,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         if self.goovis is not None:
             self.goovis.close()
+        self.calibration_tab.stop_background_work()
         if self.worker.isRunning():
             self.worker.stop()
         super().closeEvent(event)
@@ -75,8 +83,14 @@ class MainWindow(QMainWindow):
     def _on_overlay_mode_changed(self, active: bool) -> None:
         self._overlay_to_goovis = active
 
+    def _on_physical_mode_changed(self, active: bool) -> None:
+        self._physical_to_goovis = active
+
+    def _on_tab_changed(self, idx: int) -> None:
+        self.worker.raw_frame_requested = self.tabs.widget(idx) is self.calibration_tab
+
     def _on_goovis_worker_frame(self, image) -> None:
-        if self.goovis is None or self._overlay_to_goovis:
+        if self.goovis is None or self._overlay_to_goovis or self._physical_to_goovis:
             return
         self.goovis.video.set_frame(image)
 
@@ -85,3 +99,7 @@ class MainWindow(QMainWindow):
             return
         self.goovis.video.set_frame(image)
 
+    def _on_goovis_physical_frame(self, image) -> None:
+        if self.goovis is None or not self._physical_to_goovis:
+            return
+        self.goovis.video.set_frame(image)

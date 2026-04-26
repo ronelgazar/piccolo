@@ -98,7 +98,6 @@ Four phases, advanced with **N** (next) or **P** (previous). Each phase overlays
 **Live readout:**
 - Rotation `dtheta` from `StereoAligner.result.dtheta` converted to degrees
 - Displayed as `Rotation: +0.8 deg` (aim for 0)
-
 ---
 
 ## Controls

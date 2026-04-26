@@ -64,6 +64,11 @@ class PipelineWorker(QThread):
         # are expensive at full-HD, so respect the configured display FPS.
         self._last_emit_t: float = 0.0
         self._emit_interval: float = self._target_interval
+        self.raw_frame_requested: bool = False
+        self.raw_frame_interval: float = 1.0
+        self._last_raw_emit_t: float = 0.0
+        self._last_status_emit_t: float = 0.0
+        self._status_interval: float = 0.2
 
     # ------------------------------------------------------------------
 
@@ -75,12 +80,13 @@ class PipelineWorker(QThread):
                 t0 = time.perf_counter()
                 self._tick()
                 dt = time.perf_counter() - t0
-                self._fps_hist.append(dt)
-                if len(self._fps_hist) > 60:
-                    self._fps_hist.pop(0)
                 remaining = self._target_interval - dt
                 if remaining > 0:
                     self.msleep(max(1, int(remaining * 1000)))
+                total_dt = time.perf_counter() - t0
+                self._fps_hist.append(total_dt)
+                if len(self._fps_hist) > 60:
+                    self._fps_hist.pop(0)
         except Exception as exc:
             self.error.emit(f"Pipeline error: {exc}")
         finally:
@@ -149,9 +155,13 @@ class PipelineWorker(QThread):
         # share the same QImage (Qt copy-on-write — cheap to fan out).
         # The ndarray emit feeds the calibration overlay system (slot
         # gates on visibility so it costs nothing when wizard tab is hidden).
-        self.sbs_frame_ready.emit(sbs)
+        if self.raw_frame_requested and now - self._last_raw_emit_t >= self.raw_frame_interval:
+            self.sbs_frame_ready.emit(sbs.copy())
+            self._last_raw_emit_t = now
         self.sbs_qimage_ready.emit(ndarray_to_qimage(sbs))
-        self._emit_status()
+        if now - self._last_status_emit_t >= self._status_interval:
+            self._emit_status()
+            self._last_status_emit_t = now
         self._last_emit_t = now
 
     def _emit_status(self) -> None:

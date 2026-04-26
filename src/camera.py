@@ -38,6 +38,7 @@ class CameraCapture:
         self.name = name
 
         self._frame: Optional[np.ndarray] = None
+        self._frame_id: int = 0
         self._lock = threading.Lock()
         self._running = False
         self._thread: Optional[threading.Thread] = None
@@ -76,6 +77,15 @@ class CameraCapture:
         must NOT mutate the array."""
         with self._lock:
             return self._frame
+
+    def read_latest_no_copy(self) -> Tuple[Optional[np.ndarray], int]:
+        """Return the latest frame plus a monotonically increasing frame id.
+
+        The frame is not copied. Callers can use the id to avoid doing
+        expensive work again when the camera has not delivered a new frame.
+        """
+        with self._lock:
+            return self._frame, self._frame_id
 
     def stop(self):
         self._running = False
@@ -181,6 +191,7 @@ class CameraCapture:
             if ret and frame is not None:
                 with self._lock:
                     self._frame = frame
+                    self._frame_id += 1
             # No sleep – read() already blocks until a frame arrives,
             # so this loop naturally runs at camera FPS.
 
@@ -191,6 +202,7 @@ class CameraCapture:
             if frame is not None:
                 with self._lock:
                     self._frame = frame
+                    self._frame_id += 1
             else:
                 time.sleep(0.001)
 
@@ -246,8 +258,13 @@ class TestPatternCamera(CameraCapture):
     def start(self) -> "TestPatternCamera":
         self._running = True
         self._frame = self._base_frame.copy()
+        self._frame_id = 1
         # No background thread needed – the frame is static.
         return self
+
+    def read_latest_no_copy(self) -> Tuple[Optional[np.ndarray], int]:
+        self._frame_id += 1
+        return self._base_frame, self._frame_id
 
     def read(self) -> Optional[np.ndarray]:
         return self._base_frame.copy()

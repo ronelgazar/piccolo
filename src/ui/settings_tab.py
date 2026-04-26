@@ -92,6 +92,14 @@ class SettingsTab(QWidget):
             lambda v: setattr(self.worker.aligner, "enabled", v == Qt.CheckState.Checked.value))
         form.addRow(cb)
         # Zoom step
+        self.cmb_aspect = QComboBox()
+        self.cmb_aspect.addItem("Full camera width", "full")
+        self.cmb_aspect.addItem("Geometry-correct crop", "crop")
+        idx = self.cmb_aspect.findData(getattr(s, "aspect_mode", "full"))
+        self.cmb_aspect.setCurrentIndex(max(0, idx))
+        self.cmb_aspect.currentIndexChanged.connect(
+            lambda i: setattr(s, "aspect_mode", self.cmb_aspect.itemData(i)))
+        form.addRow(QLabel("Per-eye aspect"), self.cmb_aspect)
         form.addRow(QLabel("Zoom step"),
                     self._doublebox(s.zoom.step, 0.001, 1.0, 0.01,
                                     lambda v: setattr(s.zoom, "step", v)))
@@ -227,6 +235,7 @@ class SettingsTab(QWidget):
                 "zoom": asdict(cfg.stereo.zoom),
                 "convergence": asdict(cfg.stereo.convergence),
                 "alignment": asdict(cfg.stereo.alignment),
+                "aspect_mode": cfg.stereo.aspect_mode,
             },
             "calibration": asdict(cfg.calibration),
             "calibration_state": asdict(cfg.calibration_state),
