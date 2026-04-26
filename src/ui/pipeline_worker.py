@@ -23,8 +23,8 @@ from .qt_helpers import ndarray_to_qimage
 class PipelineWorker(QThread):
     """Long-running backend thread."""
 
-    sbs_frame_ready = pyqtSignal(object)        # np.ndarray — processed SBS
-    sbs_qimage_ready = pyqtSignal(object)       # QImage — processed SBS
+    sbs_frame_ready = pyqtSignal(object)        # np.ndarray — processed SBS (for overlay/wizard)
+    sbs_qimage_ready = pyqtSignal(object)       # QImage — processed SBS (for display)
     status_tick = pyqtSignal(dict)              # FPS, alignment, pedal mode
     error = pyqtSignal(str)
 
@@ -58,10 +58,12 @@ class PipelineWorker(QThread):
         self.cam_l = None
         self.cam_r = None
         self._fps_hist: list[float] = []
-        # Throttle GUI-facing emits to save CPU (GUI conversion + scaling
-        # is expensive at full camera rate).  ~33 ms = ~30 FPS display.
+        self._last_frame_ids: tuple[int, int] = (-1, -1)
+        self._target_interval: float = 1.0 / max(1, int(cfg.display.fps))
+        # Throttle GUI-facing emits to save CPU. GUI conversion and scaling
+        # are expensive at full-HD, so respect the configured display FPS.
         self._last_emit_t: float = 0.0
-        self._emit_interval: float = 1.0 / 30.0
+        self._emit_interval: float = self._target_interval
 
     # ------------------------------------------------------------------
 
@@ -76,6 +78,9 @@ class PipelineWorker(QThread):
                 self._fps_hist.append(dt)
                 if len(self._fps_hist) > 60:
                     self._fps_hist.pop(0)
+                remaining = self._target_interval - dt
+                if remaining > 0:
+                    self.msleep(max(1, int(remaining * 1000)))
         except Exception as exc:
             self.error.emit(f"Pipeline error: {exc}")
         finally:
@@ -109,11 +114,22 @@ class PipelineWorker(QThread):
         if not self._running:
             return
 
-        frame_l = self.cam_l.read_no_copy() if self.cam_l else None
-        frame_r = self.cam_r.read_no_copy() if self.cam_r else None
+        # Throttle: skip the entire pipeline between emit windows so we don't
+        # do warp + process_pair work that nothing will ever see. Big CPU win.
+        now = time.perf_counter()
+        if now - self._last_emit_t < self._emit_interval:
+            self.msleep(2)
+            return
+
+        frame_l, id_l = self.cam_l.read_latest_no_copy() if self.cam_l else (None, -1)
+        frame_r, id_r = self.cam_r.read_latest_no_copy() if self.cam_r else (None, -1)
         if frame_l is None or frame_r is None:
             self.msleep(5)
             return
+        if (id_l, id_r) == self._last_frame_ids:
+            self.msleep(1)
+            return
+        self._last_frame_ids = (id_l, id_r)
 
         if self.cfg.cameras.left.flip_180:
             frame_l = cv2.rotate(frame_l, cv2.ROTATE_180)
@@ -129,15 +145,14 @@ class PipelineWorker(QThread):
         sbs[:, :self.processor.eye_w] = eye_l
         sbs[:, self.processor.eye_w:] = eye_r
 
-        now = time.perf_counter()
-        if now - self._last_emit_t >= self._emit_interval:
-            # sbs is a reused pre-allocated buffer; emit a snapshot so
-            # UI-thread consumers never read partially-updated pixels.
-            sbs_snapshot = sbs.copy()
-            self.sbs_frame_ready.emit(sbs_snapshot)
-            self.sbs_qimage_ready.emit(ndarray_to_qimage(sbs))
-            self._emit_status()
-            self._last_emit_t = now
+        # Single conversion in worker thread; both Live tab and Goovis
+        # share the same QImage (Qt copy-on-write — cheap to fan out).
+        # The ndarray emit feeds the calibration overlay system (slot
+        # gates on visibility so it costs nothing when wizard tab is hidden).
+        self.sbs_frame_ready.emit(sbs)
+        self.sbs_qimage_ready.emit(ndarray_to_qimage(sbs))
+        self._emit_status()
+        self._last_emit_t = now
 
     def _emit_status(self) -> None:
         avg_dt = sum(self._fps_hist) / len(self._fps_hist) if self._fps_hist else 0.016

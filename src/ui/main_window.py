@@ -36,8 +36,10 @@ class MainWindow(QMainWindow):
         self.goovis: GoovisWindow | None = GoovisWindow(cfg.display)
         if self.goovis.show_on_goovis():
             self.worker.sbs_qimage_ready.connect(self._on_goovis_worker_frame)
-            self.calibration_tab.overlay_mode_changed.connect(self._on_overlay_mode_changed)
-            self.calibration_tab.overlay_frame_ready.connect(self._on_goovis_overlay_frame)
+            if hasattr(self.calibration_tab, "overlay_mode_changed"):
+                self.calibration_tab.overlay_mode_changed.connect(self._on_overlay_mode_changed)
+            if hasattr(self.calibration_tab, "overlay_frame_ready"):
+                self.calibration_tab.overlay_frame_ready.connect(self._on_goovis_overlay_frame)
         else:
             self.goovis.deleteLater()
             self.goovis = None
@@ -82,3 +84,4 @@ class MainWindow(QMainWindow):
         if self.goovis is None or not self._overlay_to_goovis:
             return
         self.goovis.video.set_frame(image)
+

@@ -44,6 +44,7 @@ class CalibrationTab(QWidget):
         root.addWidget(self._make_overlay_cal_group())
         root.addWidget(self._make_wizard_group(), stretch=1)
 
+        self._last_wizard_render_t: float = 0.0
         if worker is not None:
             worker.sbs_frame_ready.connect(self._on_frame_for_wizard)
             worker.status_tick.connect(self._on_status_for_wizard)
@@ -403,16 +404,23 @@ class CalibrationTab(QWidget):
         self._latest_status = st
 
     @pyqtSlot(object)
-    def _on_frame_for_wizard(self, sbs: np.ndarray) -> None:
+    def _on_frame_for_wizard(self, sbs) -> None:
         # Skip work entirely if this tab isn't visible — avoids wasting CPU
         # re-processing camera frames while the user is on Live or Settings.
         if not self.isVisible():
             return
+        # Throttle wizard re-render to ~10 FPS (calibration UI doesn't need
+        # smooth video, but pattern overlay drawing + sharpness is heavy).
+        import time as _t
+        now = _t.perf_counter()
+        if now - self._last_wizard_render_t < 0.1:
+            return
+        self._last_wizard_render_t = now
         if self._overlay_active:
+            # sbs is the worker's reused buffer; copy so subsequent ticks
+            # don't overwrite the pixels while we're rendering.
             self._overlay_last_sbs = sbs.copy()
             self._render_overlay_preview(self._overlay_last_sbs)
-            # Overlay mode has its own frame rendering path; skip expensive
-            # wizard camera reads and pattern drawing for responsiveness.
             return
         if self.worker is None:
             return
