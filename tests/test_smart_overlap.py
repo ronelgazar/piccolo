@@ -183,3 +183,32 @@ def test_analyzer_live_mode_runs_with_matcher():
     assert m.mode == "live"
     assert m.n_inliers >= 1
     assert all(p.color != (255, 255, 255) for p in m.pairs)
+
+
+def test_pair_stability_preserves_colors_across_frames(tmp_path):
+    img = _render_grid_eye(tmp_path)
+    a = SmartOverlapAnalyzer(
+        max_vert_dy_px=5.0, max_rotation_deg=0.5, max_zoom_ratio_err=0.02,
+        min_pairs_for_metrics=4, pair_stability_tol_px=30, matcher=None,
+    )
+    first = a.analyze(img, img.copy(), mode="chessboard", pair_count=8)
+    second = a.analyze(img, img.copy(), mode="chessboard", pair_count=8)
+    # Same scene -> every pair in the second frame should map to a previous
+    # pair within the tolerance, inheriting its colour and index.
+    second_by_xy = {p.left_xy: p for p in second.pairs}
+    for first_pair in first.pairs:
+        match = second_by_xy.get(first_pair.left_xy)
+        assert match is not None
+        assert match.color == first_pair.color
+        assert match.index == first_pair.index
+
+
+def test_reset_clears_previous_pairs(tmp_path):
+    img = _render_grid_eye(tmp_path)
+    a = SmartOverlapAnalyzer(
+        max_vert_dy_px=5.0, max_rotation_deg=0.5, max_zoom_ratio_err=0.02,
+        min_pairs_for_metrics=4, pair_stability_tol_px=30, matcher=None,
+    )
+    a.analyze(img, img.copy(), mode="chessboard", pair_count=8)
+    a.reset()
+    assert a._previous == []

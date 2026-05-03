@@ -326,17 +326,50 @@ class SmartOverlapAnalyzer:
         return eye_l.shape[1] / 2.0
 
     def _assign_colors_and_indices(self, raw: list[OverlapPair]) -> list[OverlapPair]:
-        """Stage 1: simple sequential assignment from the palette.
+        """Inherit colour/index from the closest previous pair within tolerance.
 
-        Stability tracking (Task 8) replaces this with previous-frame inheritance.
+        Unmatched new pairs receive fresh palette slots not currently in use.
         """
+        used_indices: set[int] = set()
         out: list[OverlapPair] = []
-        for i, p in enumerate(raw):
-            colour = self._palette[i % len(self._palette)]
+        tol = self.pair_stability_tol_px
+
+        # First pass: try to match each new pair to a previous pair
+        matched: list[Optional[OverlapPair]] = [None] * len(raw)
+        available_prev = list(self._previous)
+        for new_i, new_p in enumerate(raw):
+            best_j = -1
+            best_dist = tol
+            for j, prev_p in enumerate(available_prev):
+                if prev_p is None:
+                    continue
+                d = math.hypot(new_p.left_xy[0] - prev_p.left_xy[0],
+                               new_p.left_xy[1] - prev_p.left_xy[1])
+                if d < best_dist:
+                    best_dist = d
+                    best_j = j
+            if best_j >= 0:
+                prev_p = available_prev[best_j]
+                available_prev[best_j] = None  # consume
+                matched[new_i] = OverlapPair(
+                    index=prev_p.index, color=prev_p.color,
+                    left_xy=new_p.left_xy, right_xy=new_p.right_xy,
+                )
+                used_indices.add(prev_p.index)
+
+        # Second pass: assign fresh palette slots to unmatched pairs
+        free_indices = [i for i in range(len(self._palette)) if i not in used_indices]
+        free_iter = iter(free_indices)
+        for new_i, new_p in enumerate(raw):
+            if matched[new_i] is not None:
+                out.append(matched[new_i])
+                continue
+            try:
+                fresh = next(free_iter)
+            except StopIteration:
+                fresh = new_i % len(self._palette)
             out.append(OverlapPair(
-                index=i,
-                color=colour,
-                left_xy=p.left_xy,
-                right_xy=p.right_xy,
+                index=fresh, color=self._palette[fresh],
+                left_xy=new_p.left_xy, right_xy=new_p.right_xy,
             ))
         return out
