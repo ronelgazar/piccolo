@@ -59,6 +59,8 @@ calibration_state:
   joint_zoom_center_y: 50
   scale_left_pct: 100
   scale_right_pct: 100
+  smart_overlap_mode: chessboard
+  smart_overlap_pair_count: 8
 controls:
   zoom_in:
   - EQUALS

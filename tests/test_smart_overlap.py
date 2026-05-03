@@ -2,6 +2,7 @@ import numpy as np
 import cv2
 
 from src.physical_grid_calibration import generate_chessboard_page
+from src.config import StereoCfg
 from src.smart_overlap import (
     OverlapPair,
     OverlapMetrics,
@@ -12,6 +13,7 @@ from src.smart_overlap import (
     find_live_pairs,
     render_overlay,
 )
+from src.stereo_processor import StereoProcessor
 from src.stereo_matching import StereoFeatureMatcher
 
 
@@ -93,6 +95,19 @@ def test_find_chessboard_pairs_detects_injected_scale(tmp_path):
     _, ratio = find_chessboard_pairs(img, img_r, pair_count=8)
     assert ratio is not None
     assert ratio < 0.95
+
+
+def test_find_chessboard_pairs_detects_zoomed_visible_subgrid(tmp_path):
+    img = _render_grid_eye(tmp_path)
+    processor = StereoProcessor(StereoCfg(), eye_width=960, eye_height=1080)
+    processor.zoom = 1.5
+    eye_l, eye_r, _ = processor.process_pair(img, img.copy())
+
+    pairs, zoom_ratio = find_chessboard_pairs(eye_l, eye_r, pair_count=8)
+
+    assert len(pairs) == 8
+    assert zoom_ratio is not None
+    assert abs(zoom_ratio - 1.0) < 0.05
 
 
 def _bgr_feature_pair(shift_y=3):

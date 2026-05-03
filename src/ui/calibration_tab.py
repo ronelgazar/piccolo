@@ -217,6 +217,7 @@ class CalibrationTab(QWidget):
         if self._smart_active:
             self._stop_smart_mode()
         self._overlay_active = True
+        self.worker.raw_frame_mode = "full_fov"
         self._update_worker_raw_rate()
         self._overlay_flash_on = True
         self._overlay_last_sbs = None
@@ -562,6 +563,8 @@ class CalibrationTab(QWidget):
         if self._overlay_active:
             self._cancel_overlay_mode()
         self._smart_active = True
+        if self.worker is not None:
+            self.worker.raw_frame_mode = "processed"
         self.btn_smart_start.setText("Stop")
         self.smart_overlap_mode_changed.emit(True)
         self._update_worker_raw_rate()
@@ -573,6 +576,8 @@ class CalibrationTab(QWidget):
         self.btn_smart_start.setText("Start")
         self.smart_overlap_worker.reset_state()
         self.btn_apply_scale.setEnabled(False)
+        if self.worker is not None:
+            self.worker.raw_frame_mode = "full_fov"
         self.smart_overlap_mode_changed.emit(False)
         self._update_worker_raw_rate()
 

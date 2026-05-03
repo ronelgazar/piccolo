@@ -70,21 +70,50 @@ def compute_zoom_ok(
     )
 
 
-def _detect_grid(img, inner_cols=9, inner_rows=6, max_dim=420):
-    """Wrapper around physical_grid_calibration.detect_grid that downscales for speed."""
+def _detect_grid_pattern(img, inner_cols=9, inner_rows=6, max_dim=720):
+    """Detect one chessboard pattern, downscaling first when useful."""
     from .physical_grid_calibration import detect_grid
     h, w = img.shape[:2]
     largest = max(h, w)
     if largest <= max_dim:
-        return detect_grid(img, inner_cols=inner_cols, inner_rows=inner_rows, exhaustive=False)
+        detected = detect_grid(img, inner_cols=inner_cols, inner_rows=inner_rows, exhaustive=False)
+        if detected is not None:
+            return detected
+        return detect_grid(img, inner_cols=inner_cols, inner_rows=inner_rows, exhaustive=True)
     scale = max_dim / largest
     small = _resize_for_detect(img, scale)
     detected = detect_grid(small, inner_cols=inner_cols, inner_rows=inner_rows, exhaustive=False)
+    if detected is None:
+        detected = detect_grid(small, inner_cols=inner_cols, inner_rows=inner_rows, exhaustive=True)
     if detected is None:
         return None
     corners = detected.corners / scale
     center = (detected.center[0] / scale, detected.center[1] / scale)
     return GridDetection(corners=corners, center=center)
+
+
+def _detect_grid(img, inner_cols=9, inner_rows=6, max_dim=720):
+    """Wrapper around physical_grid_calibration.detect_grid that downscales for speed."""
+    return _detect_grid_pattern(img, inner_cols=inner_cols, inner_rows=inner_rows, max_dim=max_dim)
+
+
+def _detect_matching_grid_pair(eye_l, eye_r, inner_cols=9, inner_rows=6):
+    det_l = _detect_grid(eye_l, inner_cols=inner_cols, inner_rows=inner_rows)
+    det_r = _detect_grid(eye_r, inner_cols=inner_cols, inner_rows=inner_rows)
+    if det_l is not None and det_r is not None:
+        return det_l, det_r, inner_cols, inner_rows
+
+    # Zoomed views often crop the printable 9x6 board. OpenCV can still
+    # detect a smaller visible sub-board if both eyes contain the same region.
+    for cols in range(inner_cols - 1, 3, -1):
+        for rows in range(inner_rows - 1, 2, -1):
+            det_l = _detect_grid(eye_l, inner_cols=cols, inner_rows=rows)
+            if det_l is None:
+                continue
+            det_r = _detect_grid(eye_r, inner_cols=cols, inner_rows=rows)
+            if det_r is not None:
+                return det_l, det_r, cols, rows
+    return None, None, inner_cols, inner_rows
 
 
 def _resize_for_detect(img, scale):
@@ -109,15 +138,16 @@ def find_chessboard_pairs(
     """
     from .physical_grid_calibration import estimate_square_px
 
-    det_l = _detect_grid(eye_l, inner_cols=inner_cols, inner_rows=inner_rows)
-    det_r = _detect_grid(eye_r, inner_cols=inner_cols, inner_rows=inner_rows)
+    det_l, det_r, detected_cols, detected_rows = _detect_matching_grid_pair(
+        eye_l, eye_r, inner_cols=inner_cols, inner_rows=inner_rows
+    )
     if det_l is None or det_r is None:
         return [], None
 
     n_corners = det_l.corners.shape[0]
     grid = max(1, int(math.ceil(math.sqrt(pair_count))))
-    rows = inner_rows
-    cols = inner_cols
+    rows = detected_rows
+    cols = detected_cols
     chosen: list[int] = []
     for gr in range(grid):
         for gc in range(grid):
@@ -144,8 +174,8 @@ def find_chessboard_pairs(
         for i in chosen
     ]
 
-    sq_l = estimate_square_px(det_l, inner_cols=inner_cols, inner_rows=inner_rows)
-    sq_r = estimate_square_px(det_r, inner_cols=inner_cols, inner_rows=inner_rows)
+    sq_l = estimate_square_px(det_l, inner_cols=detected_cols, inner_rows=detected_rows)
+    sq_r = estimate_square_px(det_r, inner_cols=detected_cols, inner_rows=detected_rows)
     if sq_l and sq_r:
         zoom_ratio = float(sq_r) / float(sq_l)
     else:
