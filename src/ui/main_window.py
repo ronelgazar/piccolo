@@ -90,7 +90,7 @@ class MainWindow(QMainWindow):
         self.worker.raw_frame_requested = self.tabs.widget(idx) is self.calibration_tab
 
     def _on_goovis_worker_frame(self, image) -> None:
-        if self.goovis is None or self._overlay_to_goovis or self._smart_overlap_to_goovis:
+        if self.goovis is None or self._overlay_to_goovis:
             return
         self.goovis.video.set_frame(image)
 
