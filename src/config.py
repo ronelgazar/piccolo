@@ -135,6 +135,18 @@ class StreamCfg:
 
 
 @dataclass
+class SmartOverlapCfg:
+    default_mode: str = "chessboard"        # "chessboard" | "live"
+    pair_count: int = 8                     # default; user-adjustable in spinbox (4-20)
+    min_pairs_for_metrics: int = 4
+    max_vert_dy_px: float = 5.0
+    max_rotation_deg: float = 0.5
+    max_zoom_ratio_err: float = 0.02
+    pair_stability_tol_px: float = 30.0
+    worker_interval_sec: float = 0.2
+
+
+@dataclass
 class PiccoloCfg:
     display: DisplayCfg = field(default_factory=DisplayCfg)
     cameras: CamerasCfg = field(default_factory=CamerasCfg)
@@ -143,6 +155,7 @@ class PiccoloCfg:
     calibration_state: CalibrationStateCfg = field(default_factory=CalibrationStateCfg)
     controls: ControlsCfg = field(default_factory=ControlsCfg)
     stream: StreamCfg = field(default_factory=StreamCfg)
+    smart_overlap: SmartOverlapCfg = field(default_factory=SmartOverlapCfg)
 
 
 # ---------------------------------------------------------------------------

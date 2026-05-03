@@ -2,7 +2,7 @@ import os
 import sys
 import tempfile
 import yaml
-from src.config import PiccoloCfg, bundled_config_path, default_config_path, load_config
+from src.config import PiccoloCfg, SmartOverlapCfg, bundled_config_path, default_config_path, load_config
 from src.config_state import save_calibration_state
 
 
@@ -110,3 +110,30 @@ def test_save_calibration_state_creates_complete_external_config_when_missing():
         assert raw["display"]["width"] == cfg.display.width
         assert raw["stereo"]["aspect_mode"] == cfg.stereo.aspect_mode
         assert raw["calibration_state"]["nudge_right_x"] == 11
+
+
+def test_smart_overlap_defaults_when_missing(tmp_path):
+    p = tmp_path / "config.yaml"
+    p.write_text("display:\n  width: 1920\n", encoding="utf-8")
+    cfg = load_config(str(p))
+    assert isinstance(cfg.smart_overlap, SmartOverlapCfg)
+    assert cfg.smart_overlap.default_mode == "chessboard"
+    assert cfg.smart_overlap.pair_count == 8
+    assert cfg.smart_overlap.max_vert_dy_px == 5.0
+    assert cfg.smart_overlap.max_rotation_deg == 0.5
+    assert cfg.smart_overlap.max_zoom_ratio_err == 0.02
+
+
+def test_smart_overlap_overrides_from_yaml(tmp_path):
+    p = tmp_path / "config.yaml"
+    p.write_text(
+        "smart_overlap:\n"
+        "  default_mode: live\n"
+        "  pair_count: 12\n"
+        "  max_vert_dy_px: 3.5\n",
+        encoding="utf-8",
+    )
+    cfg = load_config(str(p))
+    assert cfg.smart_overlap.default_mode == "live"
+    assert cfg.smart_overlap.pair_count == 12
+    assert cfg.smart_overlap.max_vert_dy_px == 3.5

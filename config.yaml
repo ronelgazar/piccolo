@@ -82,3 +82,12 @@ controls:
   pedal_mode_b: side
   pedal_mode_c: updown
   pedal_repeat_ms: 100
+smart_overlap:
+  default_mode: chessboard
+  pair_count: 8
+  min_pairs_for_metrics: 4
+  max_vert_dy_px: 5.0
+  max_rotation_deg: 0.5
+  max_zoom_ratio_err: 0.02
+  pair_stability_tol_px: 30.0
+  worker_interval_sec: 0.2
