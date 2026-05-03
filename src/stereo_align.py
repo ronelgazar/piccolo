@@ -65,6 +65,7 @@ import cv2
 import numpy as np
 
 from .config import AlignmentCfg
+from .stereo_matching import StereoFeatureMatcher, theil_sen
 
 
 # ------------------------------------------------------------------
@@ -90,26 +91,19 @@ class AlignmentResult:
 class StereoAligner:
     """Stereo vertical-alignment via Theil-Sen epipolar regression."""
 
-    # Spatial-distribution grid (matches per cell are capped)
-    _GRID = 6
-
     def __init__(self, cfg: AlignmentCfg, frame_w: int, frame_h: int):
         self.cfg = cfg
         self.frame_w = frame_w
         self.frame_h = frame_h
 
-        # --- CLAHE for adaptive histogram equalisation ---
-        # Dramatically improves SIFT detection in low-contrast surgery
-        # tissue that the raw camera image would otherwise miss.
-        self._clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-
-        # --- SIFT detector ---
-        self._sift = cv2.SIFT_create(nfeatures=cfg.max_features)
-
-        # --- FLANN matcher (KD-tree) ---
-        index_params = dict(algorithm=1, trees=5)   # FLANN_INDEX_KDTREE
-        search_params = dict(checks=80)
-        self._matcher = cv2.FlannBasedMatcher(index_params, search_params)
+        # --- Shared feature matcher (CLAHE + SIFT + FLANN + distribution + RANSAC) ---
+        self._matcher = StereoFeatureMatcher(
+            max_features=cfg.max_features,
+            match_ratio=cfg.match_ratio,
+            ransac_thresh=cfg.ransac_thresh,
+            frame_w=frame_w,
+            frame_h=frame_h,
+        )
 
         # Current alignment state
         self.result = AlignmentResult()
@@ -206,11 +200,9 @@ class StereoAligner:
         else:
             small_l, small_r = frame_l, frame_r
 
-        # --- CLAHE on greyscale ---
+        # --- Greyscale (CLAHE moved into StereoFeatureMatcher) ---
         gray_l = cv2.cvtColor(small_l, cv2.COLOR_BGR2GRAY)
         gray_r = cv2.cvtColor(small_r, cv2.COLOR_BGR2GRAY)
-        gray_l = self._clahe.apply(gray_l)
-        gray_r = self._clahe.apply(gray_r)
 
         # --- Primary: Epipolar regression ---
         result = self._epipolar_align(gray_l, gray_r, scale=s)
@@ -299,157 +291,25 @@ class StereoAligner:
 
         Theil-Sen gives a robust estimate of both parameters.
         """
-        kp_l, des_l = self._sift.detectAndCompute(gray_l, None)
-        kp_r, des_r = self._sift.detectAndCompute(gray_r, None)
-
-        if des_l is None or des_r is None:
+        result = self._matcher.match(gray_l, gray_r)
+        if len(result.pts_l) < self.cfg.min_matches:
             return None
-        if len(kp_l) < 10 or len(kp_r) < 10:
-            return None
-
-        # --- Cross-checked matching ---
-        matches = self._cross_check_match(des_l, des_r)
-        if len(matches) < self.cfg.min_matches:
-            # Fall back to one-way matching if cross-check too strict
-            matches = self._one_way_match(des_l, des_r)
-            if len(matches) < self.cfg.min_matches:
-                return None
-
         inv_s = 1.0 / scale
-        pts_l = np.float32([kp_l[m[0]].pt for m in matches]) * inv_s
-        pts_r = np.float32([kp_r[m[1]].pt for m in matches]) * inv_s
-        n_after_ratio = len(matches)
+        pts_l = result.pts_l * inv_s
+        pts_r = result.pts_r * inv_s
 
-        # --- Stereo spatial filter ---
         dx = pts_r[:, 0] - pts_l[:, 0]
         dy = pts_r[:, 1] - pts_l[:, 1]
         max_horiz = self.frame_w * 0.4
         spatial_ok = (
-            (dx > -max_horiz) & (dx < max_horiz) &
-            (np.abs(dy) < self.cfg.max_correction_px * 1.5)
+            (dx > -max_horiz) & (dx < max_horiz)
+            & (np.abs(dy) < self.cfg.max_correction_px * 1.5)
         )
         pts_l = pts_l[spatial_ok]
         pts_r = pts_r[spatial_ok]
-
         if len(pts_l) < self.cfg.min_matches:
             return None
-
-        # --- Grid-based spatial distribution ---
-        pts_l, pts_r = self._enforce_distribution(pts_l, pts_r)
-        if len(pts_l) < self.cfg.min_matches:
-            return None
-
-        # --- Fundamental-matrix RANSAC ---
-        if len(pts_l) >= 8:
-            try:
-                F, mask_f = cv2.findFundamentalMat(
-                    pts_l, pts_r,
-                    method=cv2.FM_RANSAC,
-                    ransacReprojThreshold=self.cfg.ransac_thresh,
-                    confidence=0.999,
-                )
-            except cv2.error:
-                F, mask_f = None, None
-
-            if F is not None and mask_f is not None:
-                inlier_mask = mask_f.ravel() == 1
-                if inlier_mask.sum() >= self.cfg.min_matches:
-                    pts_l = pts_l[inlier_mask]
-                    pts_r = pts_r[inlier_mask]
-
-        # --- Theil-Sen regression ---
-        return self._epipolar_regression(pts_l, pts_r, n_after_ratio)
-
-    # ------------------------------------------------------------------
-    # Matching
-    # ------------------------------------------------------------------
-
-    def _cross_check_match(
-        self, des_l: np.ndarray, des_r: np.ndarray
-    ) -> list:
-        """L→R and R→L matching; keep only mutual best matches.
-
-        Cross-checking eliminates most wrong matches that pass the ratio
-        test in one direction but fail the symmetric check.
-        """
-        try:
-            raw_lr = self._matcher.knnMatch(des_l, des_r, k=2)
-            raw_rl = self._matcher.knnMatch(des_r, des_l, k=2)
-        except cv2.error:
-            return []
-
-        ratio = self.cfg.match_ratio
-
-        good_lr: dict[int, int] = {}
-        for pair in raw_lr:
-            if len(pair) == 2:
-                m, n = pair
-                if m.distance < ratio * n.distance:
-                    good_lr[m.queryIdx] = m.trainIdx
-
-        good_rl: dict[int, int] = {}
-        for pair in raw_rl:
-            if len(pair) == 2:
-                m, n = pair
-                if m.distance < ratio * n.distance:
-                    good_rl[m.queryIdx] = m.trainIdx
-
-        # Keep only mutual matches
-        mutual = []
-        for l_idx, r_idx in good_lr.items():
-            if good_rl.get(r_idx) == l_idx:
-                mutual.append((l_idx, r_idx))
-
-        return mutual
-
-    def _one_way_match(
-        self, des_l: np.ndarray, des_r: np.ndarray
-    ) -> list:
-        """Standard one-way ratio-tested matching (less strict fallback)."""
-        try:
-            raw = self._matcher.knnMatch(des_l, des_r, k=2)
-        except cv2.error:
-            return []
-
-        matches = []
-        for pair in raw:
-            if len(pair) == 2:
-                m, n = pair
-                if m.distance < self.cfg.match_ratio * n.distance:
-                    matches.append((m.queryIdx, m.trainIdx))
-        return matches
-
-    # ------------------------------------------------------------------
-    # Spatial distribution
-    # ------------------------------------------------------------------
-
-    def _enforce_distribution(
-        self, pts_l: np.ndarray, pts_r: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """Cap matches per grid cell so no image region dominates.
-
-        A high-texture region (surgical drape pattern, instrument label)
-        can produce hundreds of matches in a small area, overwhelming the
-        regression.  By capping per-cell contributions, every part of the
-        frame gets equal influence on the correction estimate.
-        """
-        g = self._GRID
-        cell_w = self.frame_w / g
-        cell_h = self.frame_h / g
-
-        buckets: dict[tuple, list] = {}
-        for i in range(len(pts_l)):
-            gx = min(int(pts_l[i, 0] / cell_w), g - 1)
-            gy = min(int(pts_l[i, 1] / cell_h), g - 1)
-            buckets.setdefault((gx, gy), []).append(i)
-
-        max_per = max(6, len(pts_l) // (g * g) + 1)
-        sel = []
-        for indices in buckets.values():
-            sel.extend(indices[:max_per])
-
-        idx = np.array(sel)
-        return pts_l[idx], pts_r[idx]
+        return self._epipolar_regression(pts_l, pts_r, len(pts_l))
 
     # ------------------------------------------------------------------
     # Theil-Sen robust regression
@@ -485,7 +345,7 @@ class StereoAligner:
         vert_diff = pts_r[:, 1] - pts_l[:, 1]
         x_centered = pts_l[:, 0] - cx
 
-        theta, offset, rms = self._theil_sen(x_centered, vert_diff)
+        theta, offset, rms = theil_sen(x_centered, vert_diff)
 
         # Clamp
         max_dy = self.cfg.max_correction_px
@@ -502,58 +362,6 @@ class StereoAligner:
             method="epipolar",
             rms_residual=rms,
         )
-
-    @staticmethod
-    def _theil_sen(x: np.ndarray, y: np.ndarray) -> Tuple[float, float, float]:
-        """Theil-Sen robust linear fit: ``y = slope·x + intercept``.
-
-        The Theil-Sen estimator computes the **median** of all pairwise
-        slopes, followed by the **median** of the resulting intercepts.
-        It tolerates up to ≈29 % gross outliers — far more robust than
-        ordinary least-squares and comparably robust to RANSAC, but
-        deterministic and parameter-free.
-
-        For large *n* the all-pairs computation is O(n²); we switch to
-        random sub-sampling above 200 points to keep runtime bounded.
-
-        Returns ``(slope, intercept, rms_residual)``.
-        """
-        n = len(x)
-        min_sep = 30.0  # minimum x-separation for a useful slope pair
-
-        if n <= 200:
-            # --- Exact: all unique pairs (i < j) via vectorised indices ---
-            ii, jj = np.triu_indices(n, k=1)
-            dx = x[jj] - x[ii]
-            valid = np.abs(dx) > min_sep
-            if valid.sum() < 3:
-                slope = 0.0          # not enough x-spread → assume no rotation
-            else:
-                slopes = (y[jj[valid]] - y[ii[valid]]) / dx[valid]
-                slope = float(np.median(slopes))
-        else:
-            # --- Sub-sampled: random pairs ---
-            rng = np.random.default_rng(42)
-            n_pairs = min(50_000, n * (n - 1) // 2)
-            ai = rng.integers(0, n, n_pairs)
-            bi = rng.integers(0, n, n_pairs)
-            keep = ai != bi
-            ai, bi = ai[keep], bi[keep]
-            dx = x[bi] - x[ai]
-            valid = np.abs(dx) > min_sep
-            if valid.sum() < 3:
-                slope = 0.0
-            else:
-                slopes = (y[bi[valid]] - y[ai[valid]]) / dx[valid]
-                slope = float(np.median(slopes[valid]))
-
-        intercepts = y - slope * x
-        intercept = float(np.median(intercepts))
-
-        residuals = y - (intercept + slope * x)
-        rms = float(np.sqrt(np.mean(residuals ** 2)))
-
-        return slope, intercept, rms
 
     # ------------------------------------------------------------------
     # Phase-correlation fallback
@@ -747,25 +555,3 @@ class StereoAligner:
 
         print(f"Alignment adjusted for zoom level: {zoom_level}")
 
-    def optimize_clahe(self, zoom_level: float):
-        """Dynamically adjust CLAHE parameters based on zoom level."""
-        # Example: Scale clip limit and tile grid size based on zoom level
-        clip_limit = 3.0 * zoom_level
-        tile_grid_size = (int(8 * zoom_level), int(8 * zoom_level))
-        self._clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tile_grid_size)
-        print(f"CLAHE parameters adjusted: clip_limit={clip_limit}, tile_grid_size={tile_grid_size}")
-
-    def optimize_sift_features(self, zoom_level: float):
-        """Dynamically adjust the number of SIFT features based on zoom level."""
-        max_features = int(self.cfg.max_features * zoom_level)
-        self._sift = cv2.SIFT_create(nfeatures=max_features)
-        print(f"SIFT max features adjusted: {max_features}")
-
-    def optimize_flann(self, zoom_level: float):
-        """Dynamically adjust FLANN matcher parameters based on zoom level."""
-        trees = max(1, int(5 * zoom_level))
-        checks = max(10, int(80 * zoom_level))
-        index_params = dict(algorithm=1, trees=trees)   # FLANN_INDEX_KDTREE
-        search_params = dict(checks=checks)
-        self._matcher = cv2.FlannBasedMatcher(index_params, search_params)
-        print(f"FLANN parameters adjusted: trees={trees}, checks={checks}")
