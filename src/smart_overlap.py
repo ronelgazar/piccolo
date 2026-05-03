@@ -18,8 +18,6 @@ import numpy as np
 
 from .physical_grid_calibration import GridDetection
 from .stereo_matching import theil_sen
-# Imported lazily inside the function to keep top-level imports light:
-#   from .physical_cal import _detect_grid_scaled, estimate_square_px
 
 
 @dataclass(frozen=True)
