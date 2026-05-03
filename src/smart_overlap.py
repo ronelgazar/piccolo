@@ -231,6 +231,7 @@ def _zoom_from_pair_distances(pts_l: np.ndarray, pts_r: np.ndarray) -> Optional[
 
 
 _PALETTE_SIZE = 20  # max user-tunable pair count is 20
+_PAIR_POSITION_SMOOTHING = 0.75
 
 
 def _build_palette(n: int) -> list[Tuple[int, int, int]]:
@@ -323,10 +324,19 @@ class SmartOverlapAnalyzer:
     def _frame_cx(eye_l: np.ndarray) -> float:
         return eye_l.shape[1] / 2.0
 
+    @staticmethod
+    def _blend_xy(prev_xy: tuple[float, float], new_xy: tuple[float, float]) -> tuple[float, float]:
+        alpha = _PAIR_POSITION_SMOOTHING
+        return (
+            alpha * prev_xy[0] + (1.0 - alpha) * new_xy[0],
+            alpha * prev_xy[1] + (1.0 - alpha) * new_xy[1],
+        )
+
     def _assign_colors_and_indices(self, raw: list[OverlapPair]) -> list[OverlapPair]:
         """Inherit colour/index from the closest previous pair within tolerance.
 
         Unmatched new pairs receive fresh palette slots not currently in use.
+        Matched pairs are position-smoothed to avoid jittery visual threads.
         """
         used_indices: set[int] = set()
         out: list[OverlapPair] = []
@@ -351,7 +361,8 @@ class SmartOverlapAnalyzer:
                 available_prev[best_j] = None  # consume
                 matched[new_i] = OverlapPair(
                     index=prev_p.index, color=prev_p.color,
-                    left_xy=new_p.left_xy, right_xy=new_p.right_xy,
+                    left_xy=self._blend_xy(prev_p.left_xy, new_p.left_xy),
+                    right_xy=self._blend_xy(prev_p.right_xy, new_p.right_xy),
                 )
                 used_indices.add(prev_p.index)
 

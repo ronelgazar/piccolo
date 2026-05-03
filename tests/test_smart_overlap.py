@@ -215,6 +215,24 @@ def test_reset_clears_previous_pairs(tmp_path):
     assert a._previous == []
 
 
+def test_pair_stability_smooths_position_jitter():
+    a = SmartOverlapAnalyzer(
+        max_vert_dy_px=5.0, max_rotation_deg=0.5, max_zoom_ratio_err=0.02,
+        min_pairs_for_metrics=4, pair_stability_tol_px=30, matcher=None,
+    )
+    first = [
+        OverlapPair(index=-1, color=(255, 255, 255), left_xy=(100.0, 100.0), right_xy=(120.0, 101.0)),
+    ]
+    second = [
+        OverlapPair(index=-1, color=(255, 255, 255), left_xy=(108.0, 100.0), right_xy=(128.0, 101.0)),
+    ]
+    a._previous = a._assign_colors_and_indices(first)
+    smoothed = a._assign_colors_and_indices(second)[0]
+    assert smoothed.index == 0
+    assert smoothed.left_xy == (102.0, 100.0)
+    assert smoothed.right_xy == (122.0, 101.0)
+
+
 def test_render_overlay_returns_same_shape_image_with_markers_drawn(tmp_path):
     img = _render_grid_eye(tmp_path)
     # Build an SBS frame from two copies of the same eye

@@ -23,6 +23,8 @@ from .video_widget import VideoWidget
 class CalibrationTab(QWidget):
     overlay_mode_changed = pyqtSignal(bool)
     overlay_frame_ready = pyqtSignal(object)  # QImage
+    smart_overlap_mode_changed = pyqtSignal(bool)
+    smart_overlap_frame_ready = pyqtSignal(object)  # QImage
     OVERLAY_SLAVE_OPACITY = 0.70
 
     def __init__(self, worker, parent=None):
@@ -446,7 +448,9 @@ class CalibrationTab(QWidget):
         controls.addWidget(QLabel("Mode:"))
         self.mode_combo = QComboBox(box)
         self.mode_combo.addItems(["Chessboard", "Live scene"])
+        self.mode_combo.blockSignals(True)
         self.mode_combo.setCurrentIndex(0 if self._smart_mode == "chessboard" else 1)
+        self.mode_combo.blockSignals(False)
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         controls.addWidget(self.mode_combo)
 
@@ -454,7 +458,9 @@ class CalibrationTab(QWidget):
         controls.addWidget(QLabel("Pairs:"))
         self.pair_spin = QSpinBox(box)
         self.pair_spin.setRange(4, 20)
+        self.pair_spin.blockSignals(True)
         self.pair_spin.setValue(self._smart_pair_count)
+        self.pair_spin.blockSignals(False)
         self.pair_spin.valueChanged.connect(self._on_pair_count_changed)
         controls.addWidget(self.pair_spin)
 
@@ -501,6 +507,8 @@ class CalibrationTab(QWidget):
     def _on_smart_overlap_result(self, result: SmartOverlapResult) -> None:
         self._latest_metrics = result.metrics
         self.smart_preview.set_frame(result.image)
+        if self._smart_active:
+            self.smart_overlap_frame_ready.emit(result.image)
         self._update_smart_readouts(result.metrics)
 
     def _update_smart_readouts(self, m: OverlapMetrics) -> None:
@@ -555,6 +563,7 @@ class CalibrationTab(QWidget):
             self._cancel_overlay_mode()
         self._smart_active = True
         self.btn_smart_start.setText("Stop")
+        self.smart_overlap_mode_changed.emit(True)
         self._update_worker_raw_rate()
 
     def _stop_smart_mode(self) -> None:
@@ -564,6 +573,7 @@ class CalibrationTab(QWidget):
         self.btn_smart_start.setText("Start")
         self.smart_overlap_worker.reset_state()
         self.btn_apply_scale.setEnabled(False)
+        self.smart_overlap_mode_changed.emit(False)
         self._update_worker_raw_rate()
 
     def _on_mode_changed(self, idx: int) -> None:
