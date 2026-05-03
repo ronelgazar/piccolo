@@ -373,3 +373,37 @@ class SmartOverlapAnalyzer:
                 left_xy=new_p.left_xy, right_xy=new_p.right_xy,
             ))
         return out
+
+
+def render_overlay(sbs: np.ndarray, metrics: OverlapMetrics) -> np.ndarray:
+    """Draw coloured numbered markers + connecting threads onto the SBS frame.
+
+    `sbs` is a (H, 2W, 3) BGR image with left half + right half concatenated
+    horizontally. Markers are drawn at each pair's left_xy (in left half) and
+    right_xy (offset by W into the right half). Threads connect them.
+    """
+    import cv2
+    out = sbs.copy()
+    if out.ndim != 3 or out.shape[2] != 3:
+        return out
+    h, total_w, _ = out.shape
+    eye_w = total_w // 2
+
+    # Eye-gap divider
+    cv2.line(out, (eye_w, 0), (eye_w, h), (60, 60, 60), 1, cv2.LINE_AA)
+
+    for p in metrics.pairs:
+        lx = int(round(p.left_xy[0]))
+        ly = int(round(p.left_xy[1]))
+        rx = int(round(p.right_xy[0])) + eye_w
+        ry = int(round(p.right_xy[1]))
+        # Marker circle and number per eye
+        cv2.circle(out, (lx, ly), 9, p.color, 2, cv2.LINE_AA)
+        cv2.circle(out, (rx, ry), 9, p.color, 2, cv2.LINE_AA)
+        cv2.putText(out, str(p.index + 1), (lx - 4, ly + 4),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, p.color, 1, cv2.LINE_AA)
+        cv2.putText(out, str(p.index + 1), (rx - 4, ry + 4),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, p.color, 1, cv2.LINE_AA)
+        # Connecting thread
+        cv2.line(out, (lx, ly), (rx, ry), p.color, 1, cv2.LINE_AA)
+    return out

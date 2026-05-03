@@ -10,6 +10,7 @@ from src.smart_overlap import (
     compute_zoom_ok,
     find_chessboard_pairs,
     find_live_pairs,
+    render_overlay,
 )
 from src.stereo_matching import StereoFeatureMatcher
 
@@ -212,3 +213,31 @@ def test_reset_clears_previous_pairs(tmp_path):
     a.analyze(img, img.copy(), mode="chessboard", pair_count=8)
     a.reset()
     assert a._previous == []
+
+
+def test_render_overlay_returns_same_shape_image_with_markers_drawn(tmp_path):
+    img = _render_grid_eye(tmp_path)
+    # Build an SBS frame from two copies of the same eye
+    sbs = np.concatenate([img, img.copy()], axis=1)
+    a = SmartOverlapAnalyzer(
+        max_vert_dy_px=5.0, max_rotation_deg=0.5, max_zoom_ratio_err=0.02,
+        min_pairs_for_metrics=4, pair_stability_tol_px=30, matcher=None,
+    )
+    metrics = a.analyze(img, img.copy(), mode="chessboard", pair_count=8)
+    out = render_overlay(sbs, metrics)
+    assert out.shape == sbs.shape
+    # Some pixels must differ (markers + threads drawn)
+    assert int(np.sum(out != sbs)) > 100
+
+
+def test_render_overlay_empty_metrics_returns_input_unmodified():
+    blank = np.full((200, 400, 3), 50, dtype=np.uint8)
+    empty = OverlapMetrics(
+        mode="chessboard", pairs=[], vert_dy_px=0.0, rotation_deg=0.0,
+        zoom_ratio=None, n_inliers=0, n_requested=8,
+        align_ok=False, zoom_ok=False,
+    )
+    out = render_overlay(blank, empty)
+    assert out.shape == blank.shape
+    # No pairs -> only the divider line is drawn
+    assert int(np.sum(out != blank)) < 5000
