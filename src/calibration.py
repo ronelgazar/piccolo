@@ -55,6 +55,9 @@ class CalibrationOverlay:
         # Persistent per-eye vertical offsets (positive = shift image downward)
         self.nudge_left_y: int = 0
         self.nudge_right_y: int = 0
+        # Persistent per-eye scale compensation. 100 means unchanged.
+        self.scale_left_pct: int = 100
+        self.scale_right_pct: int = 100
 
     # ------------------------------------------------------------------
     # Control
@@ -115,6 +118,8 @@ class CalibrationOverlay:
         self.nudge_right = 0
         self.nudge_left_y = 0
         self.nudge_right_y = 0
+        self.scale_left_pct = 100
+        self.scale_right_pct = 100
 
     def set_nudge_y(self, eye: str, value: int) -> None:
         """Set the vertical nudge offset (in pixels) for one eye.
@@ -162,11 +167,49 @@ class CalibrationOverlay:
         manual corrections are always active.  Uses ``np.roll`` for
         speed; border pixels are zeroed to avoid wrap artefacts.
         """
+        eye_l = self._scale_eye(eye_l, self.scale_left_pct)
+        eye_r = self._scale_eye(eye_r, self.scale_right_pct)
         eye_l = self._roll_and_zero(eye_l, self.nudge_left, axis=1)
         eye_r = self._roll_and_zero(eye_r, self.nudge_right, axis=1)
         eye_l = self._roll_and_zero(eye_l, self.nudge_left_y, axis=0)
         eye_r = self._roll_and_zero(eye_r, self.nudge_right_y, axis=0)
         return eye_l, eye_r
+
+    @staticmethod
+    def _scale_eye(img: np.ndarray, scale_pct: int) -> np.ndarray:
+        """Center-scale one eye, preserving the output frame size."""
+        if scale_pct == 100:
+            return img
+        h, w = img.shape[:2]
+        scale = max(0.05, float(scale_pct) / 100.0)
+        scaled_w = max(1, int(round(w * scale)))
+        scaled_h = max(1, int(round(h * scale)))
+        resized = cv2.resize(img, (scaled_w, scaled_h), interpolation=cv2.INTER_LINEAR)
+        out = np.zeros_like(img)
+
+        if scaled_w >= w:
+            src_x0 = (scaled_w - w) // 2
+            dst_x0 = 0
+            copy_w = w
+        else:
+            src_x0 = 0
+            dst_x0 = (w - scaled_w) // 2
+            copy_w = scaled_w
+
+        if scaled_h >= h:
+            src_y0 = (scaled_h - h) // 2
+            dst_y0 = 0
+            copy_h = h
+        else:
+            src_y0 = 0
+            dst_y0 = (h - scaled_h) // 2
+            copy_h = scaled_h
+
+        out[dst_y0:dst_y0 + copy_h, dst_x0:dst_x0 + copy_w] = resized[
+            src_y0:src_y0 + copy_h,
+            src_x0:src_x0 + copy_w,
+        ]
+        return out
 
     def apply(self, eye_l: np.ndarray, eye_r: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Draw calibration overlay and blank the inactive eye.

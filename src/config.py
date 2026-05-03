@@ -7,6 +7,7 @@ rest of the codebase never has to worry about missing keys.
 from __future__ import annotations
 
 import os
+import sys
 import yaml
 from dataclasses import dataclass, field
 from typing import List, Tuple
@@ -59,6 +60,7 @@ class AlignmentCfg:
     max_correction_deg: float = 1.0
     smoothing: float = 0.55        # gentle residual cleanup after physical calibration
     detection_scale: float = 0.5
+    mask_overlap: bool = False     # False preserves full FOV; True blacks pixels invalid in either eye
 
 
 @dataclass
@@ -88,6 +90,8 @@ class CalibrationStateCfg:
     convergence_offset: int = 0
     joint_zoom_center: int = 50
     joint_zoom_center_y: int = 50
+    scale_left_pct: int = 100
+    scale_right_pct: int = 100
 
 
 @dataclass
@@ -162,14 +166,30 @@ def _merge(dataclass_obj, raw_dict: dict | None):
     return dataclass_obj
 
 
+def default_config_path() -> str:
+    """Return the editable config path for source or packaged execution."""
+    if getattr(sys, "frozen", False):
+        return os.path.join(os.path.dirname(sys.executable), "config.yaml")
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.yaml")
+
+
+def bundled_config_path() -> str | None:
+    """Return the bundled fallback config path when running from PyInstaller."""
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if not bundle_root:
+        return None
+    return os.path.join(bundle_root, "config.yaml")
+
+
 def load_config(path: str | None = None) -> PiccoloCfg:
     """Load configuration from *path* (defaults to ``config.yaml`` next to
-    the project root).  Missing keys silently fall back to defaults."""
-    if path is None:
-        path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
+    the project root or packaged exe). Missing keys silently fall back to defaults."""
     cfg = PiccoloCfg()
-    if os.path.isfile(path):
-        with open(path, "r", encoding="utf-8") as fh:
-            raw = yaml.safe_load(fh) or {}
-        _merge(cfg, raw)
+    paths = [path] if path is not None else [default_config_path(), bundled_config_path()]
+    for candidate in paths:
+        if candidate and os.path.isfile(candidate):
+            with open(candidate, "r", encoding="utf-8") as fh:
+                raw = yaml.safe_load(fh) or {}
+            _merge(cfg, raw)
+            break
     return cfg

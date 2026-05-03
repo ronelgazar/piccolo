@@ -1,7 +1,8 @@
 import os
+import sys
 import tempfile
 import yaml
-from src.config import PiccoloCfg, load_config
+from src.config import PiccoloCfg, bundled_config_path, default_config_path, load_config
 from src.config_state import save_calibration_state
 
 
@@ -34,6 +35,8 @@ def test_load_populates_calibration_state():
         assert cfg.calibration_state.nudge_right_y == -5
         assert cfg.calibration_state.joint_zoom_center == 42
         assert cfg.calibration_state.nudge_left_y == 0
+        assert cfg.calibration_state.scale_left_pct == 100
+        assert cfg.calibration_state.scale_right_pct == 100
 
 
 def test_save_calibration_state_round_trip():
@@ -68,3 +71,42 @@ def test_save_does_not_clobber_other_keys():
         assert raw["cameras"]["left"]["flip_180"] is True
         assert raw["stereo"]["zoom"]["step"] == 0.07
         assert raw["calibration_state"]["nudge_left_x"] == 9
+
+
+def test_default_config_path_uses_exe_directory_when_frozen(monkeypatch):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", r"C:\App\piccolo.exe")
+
+    assert default_config_path() == r"C:\App\config.yaml"
+
+
+def test_load_config_uses_bundled_config_when_external_missing(monkeypatch):
+    with tempfile.TemporaryDirectory() as tmp:
+        bundle = os.path.join(tmp, "bundle")
+        exe_dir = os.path.join(tmp, "app")
+        os.makedirs(bundle)
+        os.makedirs(exe_dir)
+        _write_yaml(os.path.join(bundle, "config.yaml"), {"display": {"width": 1234}})
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        monkeypatch.setattr(sys, "_MEIPASS", bundle, raising=False)
+        monkeypatch.setattr(sys, "executable", os.path.join(exe_dir, "piccolo.exe"))
+
+        cfg = load_config()
+
+        assert bundled_config_path() == os.path.join(bundle, "config.yaml")
+        assert cfg.display.width == 1234
+
+
+def test_save_calibration_state_creates_complete_external_config_when_missing():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "config.yaml")
+        cfg = PiccoloCfg()
+        cfg.calibration_state.nudge_right_x = 11
+
+        save_calibration_state(cfg, path)
+
+        with open(path, encoding="utf-8") as fh:
+            raw = yaml.safe_load(fh)
+        assert raw["display"]["width"] == cfg.display.width
+        assert raw["stereo"]["aspect_mode"] == cfg.stereo.aspect_mode
+        assert raw["calibration_state"]["nudge_right_x"] == 11

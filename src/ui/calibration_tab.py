@@ -43,6 +43,7 @@ class CalibrationTab(QWidget):
         self._overlay_last_sbs: np.ndarray | None = None
         self._overlay_flash_timer = QTimer(self)
         self._overlay_flash_timer.timeout.connect(self._toggle_overlay_flash)
+        self._latest_grid_metrics: GridPairMetrics | None = None
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._overlay_shortcuts: list[QShortcut] = []
         self._init_overlay_shortcuts()
@@ -72,16 +73,18 @@ class CalibrationTab(QWidget):
         self.sld_rx = self._add_slider(lay, "Right eye X", st.nudge_right_x, self._on_rx)
         self.sld_ly = self._add_slider(lay, "Left eye Y",  st.nudge_left_y,  self._on_ly)
         self.sld_ry = self._add_slider(lay, "Right eye Y", st.nudge_right_y, self._on_ry)
+        self.sld_lscale = self._add_slider(lay, "Left scale", st.scale_left_pct, self._on_lscale, lo=80, hi=120, unit="%")
+        self.sld_rscale = self._add_slider(lay, "Right scale", st.scale_right_pct, self._on_rscale, lo=80, hi=120, unit="%")
         return box
 
-    def _add_slider(self, parent_layout, label: str, initial: int, cb) -> QSlider:
+    def _add_slider(self, parent_layout, label: str, initial: int, cb, lo: int = -300, hi: int = 300, unit: str = "px") -> QSlider:
         row = QHBoxLayout()
-        lbl = QLabel(f"{label}: {initial}px")
+        lbl = QLabel(f"{label}: {initial}{unit}")
         sld = QSlider(Qt.Orientation.Horizontal)
-        sld.setMinimum(-300)
-        sld.setMaximum(300)
+        sld.setMinimum(lo)
+        sld.setMaximum(hi)
         sld.setValue(initial)
-        sld.valueChanged.connect(lambda v, l=lbl, t=label: l.setText(f"{t}: {v}px"))
+        sld.valueChanged.connect(lambda v, l=lbl, t=label, u=unit: l.setText(f"{t}: {v}{u}"))
         sld.sliderReleased.connect(lambda s=sld, cb=cb: cb(s.value()))
         row.addWidget(lbl, stretch=1)
         row.addWidget(sld, stretch=3)
@@ -109,6 +112,12 @@ class CalibrationTab(QWidget):
     def _on_ry(self, v: int) -> None:
         self._set("nudge_right_y", v, lambda: setattr(self.worker.calibration, "nudge_right_y", v))
 
+    def _on_lscale(self, v: int) -> None:
+        self._set("scale_left_pct", v, lambda: setattr(self.worker.calibration, "scale_left_pct", v))
+
+    def _on_rscale(self, v: int) -> None:
+        self._set("scale_right_pct", v, lambda: setattr(self.worker.calibration, "scale_right_pct", v))
+
     def _set(self, attr: str, value: int, apply_runtime) -> None:
         setattr(self.worker.cfg.calibration_state, attr, value)
         apply_runtime()
@@ -119,9 +128,12 @@ class CalibrationTab(QWidget):
             return
         for s in (self.sld_lx, self.sld_rx, self.sld_ly, self.sld_ry):
             s.setValue(0)
+        for s in (self.sld_lscale, self.sld_rscale):
+            s.setValue(100)
         self.worker.calibration.reset_nudge()
         st = self.worker.cfg.calibration_state
         st.nudge_left_x = st.nudge_right_x = st.nudge_left_y = st.nudge_right_y = 0
+        st.scale_left_pct = st.scale_right_pct = 100
         save_calibration_state(self.worker.cfg)
 
     # ------------------ Overlay/manual calibration --------------------
@@ -190,7 +202,7 @@ class CalibrationTab(QWidget):
         self._update_worker_raw_rate()
         self._overlay_flash_on = True
         self._overlay_last_sbs = None
-        self._load_overlay_slave_from_state()
+        self._reset_overlay_slave_offset()
         self._overlay_flash_timer.start(self.flash_ms.value())
         self.btn_overlay_start.setText("Stop overlay calibration")
         self.btn_overlay_save.setEnabled(True)
@@ -238,7 +250,7 @@ class CalibrationTab(QWidget):
 
     def _on_master_changed(self, idx: int) -> None:
         self._overlay_master = "left" if idx == 0 else "right"
-        self._load_overlay_slave_from_state()
+        self._reset_overlay_slave_offset()
         if self._overlay_active:
             self.overlay_hint_lbl.setText(self._overlay_status_text())
 
@@ -250,16 +262,12 @@ class CalibrationTab(QWidget):
         self._overlay_flash_on = not self._overlay_flash_on
         self._refresh_overlay_preview()
 
-    def _load_overlay_slave_from_state(self) -> None:
-        if self.worker is None:
-            return
-        st = self.worker.cfg.calibration_state
-        if self._slave_eye() == "left":
-            self._overlay_slave_x = st.nudge_left_x
-            self._overlay_slave_y = st.nudge_left_y
-        else:
-            self._overlay_slave_x = st.nudge_right_x
-            self._overlay_slave_y = st.nudge_right_y
+    def _reset_overlay_slave_offset(self) -> None:
+        # Overlay calibration uses the pre-nudge full-FOV frame. Starting from
+        # the saved nudge would immediately shift/crop the slave image when the
+        # previous offset is large, making recalibration hard to reason about.
+        self._overlay_slave_x = 0
+        self._overlay_slave_y = 0
 
     def _slave_eye(self) -> str:
         return "right" if self._overlay_master == "left" else "left"
@@ -300,22 +308,15 @@ class CalibrationTab(QWidget):
         eye_w = sbs.shape[1] // 2
         left = sbs[:, :eye_w].copy()
         right = sbs[:, eye_w:].copy()
-        st = self.worker.cfg.calibration_state if self.worker is not None else None
 
         if self._overlay_master == "left":
-            base_x = st.nudge_right_x if st is not None else 0
-            base_y = st.nudge_right_y if st is not None else 0
-            slave_shifted = self._shift_eye(right, self._overlay_slave_x - base_x, self._overlay_slave_y - base_y)
-            out_left = left
-            out_right = self._slave_visible_image(slave_shifted) if self._overlay_flash_on else np.zeros_like(slave_shifted)
+            slave_shifted = self._shift_eye(right, self._overlay_slave_x, self._overlay_slave_y)
+            composite_eye = self._overlay_composite(left, slave_shifted)
         else:
-            base_x = st.nudge_left_x if st is not None else 0
-            base_y = st.nudge_left_y if st is not None else 0
-            slave_shifted = self._shift_eye(left, self._overlay_slave_x - base_x, self._overlay_slave_y - base_y)
-            out_left = self._slave_visible_image(slave_shifted) if self._overlay_flash_on else np.zeros_like(slave_shifted)
-            out_right = right
+            slave_shifted = self._shift_eye(left, self._overlay_slave_x, self._overlay_slave_y)
+            composite_eye = self._overlay_composite(right, slave_shifted)
 
-        composite = np.concatenate([out_left, out_right], axis=1)
+        composite = np.concatenate([composite_eye.copy(), composite_eye.copy()], axis=1)
 
         h, w = composite.shape[:2]
         # Draw a crosshair in each eye so alignment is easy while preserving native eye layout.
@@ -335,6 +336,20 @@ class CalibrationTab(QWidget):
         qimg = ndarray_to_qimage(composite)
         self.overlay_preview.set_frame(qimg)
         self.overlay_frame_ready.emit(qimg)
+
+    def _overlay_composite(self, master: np.ndarray, slave: np.ndarray) -> np.ndarray:
+        out = master.copy()
+        if self._overlay_flash_on:
+            slave_visible = self._slave_visible_image(slave)
+            mask = np.any(slave > 0, axis=2)
+            out[mask] = cv2.addWeighted(
+                master[mask],
+                1.0 - self.OVERLAY_SLAVE_OPACITY,
+                slave_visible[mask],
+                self.OVERLAY_SLAVE_OPACITY,
+                0,
+            )
+        return out
 
     def _init_overlay_shortcuts(self) -> None:
         def bind(key: str, handler):
@@ -409,11 +424,15 @@ class CalibrationTab(QWidget):
         self.wizard_readout_lbl.setStyleSheet("font-family: monospace;")
         self.btn_physical_start = QPushButton("Start physical calibration")
         self.btn_physical_start.clicked.connect(self._toggle_physical_mode)
+        self.btn_apply_scale = QPushButton("Apply detected scale")
+        self.btn_apply_scale.clicked.connect(self._apply_detected_scale)
+        self.btn_apply_scale.setEnabled(False)
         self.btn_prev = QPushButton("← Prev")
         self.btn_next = QPushButton("Next →")
         self.btn_prev.clicked.connect(self._wizard_prev)
         self.btn_next.clicked.connect(self._wizard_next)
         btns.addWidget(self.btn_physical_start)
+        btns.addWidget(self.btn_apply_scale)
         btns.addSpacing(12)
         btns.addWidget(self.btn_prev)
         btns.addWidget(self.btn_next)
@@ -455,6 +474,10 @@ class CalibrationTab(QWidget):
     def _on_physical_result(self, result: PhysicalCalResult) -> None:
         if result.phase != self.session.phase:
             return
+        self._latest_grid_metrics = result.metrics
+        self.btn_apply_scale.setEnabled(
+            self.session.phase == "scale" and result.metrics.zoom_ratio is not None
+        )
         self.wizard_preview.set_frame(result.image)
         if self._physical_active:
             self.physical_frame_ready.emit(result.image)
@@ -557,9 +580,25 @@ class CalibrationTab(QWidget):
 
     def _wizard_next(self) -> None:
         self.session.next_phase()
+        self.btn_apply_scale.setEnabled(False)
 
     def _wizard_prev(self) -> None:
         self.session.prev_phase()
+        self.btn_apply_scale.setEnabled(False)
+
+    def _apply_detected_scale(self) -> None:
+        metrics = self._latest_grid_metrics
+        if self.worker is None or metrics is None or metrics.zoom_ratio is None:
+            return
+        # Keep left as the reference. If the right image is larger, this
+        # scales it down. If it is smaller, this scales it up. Mechanical lens
+        # matching is still preferred, but this removes residual mismatch.
+        right_scale = int(round(100.0 / metrics.zoom_ratio))
+        right_scale = max(80, min(120, right_scale))
+        self.sld_lscale.setValue(100)
+        self.sld_rscale.setValue(right_scale)
+        self._on_lscale(100)
+        self._on_rscale(right_scale)
 
 
 def _ok(value: bool) -> str:

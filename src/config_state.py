@@ -7,7 +7,7 @@ from typing import Any
 
 import yaml
 
-from .config import PiccoloCfg
+from .config import PiccoloCfg, default_config_path
 
 
 def save_calibration_state(cfg: PiccoloCfg, path: str | None = None) -> None:
@@ -16,7 +16,7 @@ def save_calibration_state(cfg: PiccoloCfg, path: str | None = None) -> None:
     """
     if path is None:
         path = _default_config_path()
-    raw: dict[str, Any] = {}
+    raw: dict[str, Any] = _cfg_to_dict(cfg)
     if os.path.isfile(path):
         with open(path, "r", encoding="utf-8") as fh:
             raw = yaml.safe_load(fh) or {}
@@ -26,7 +26,26 @@ def save_calibration_state(cfg: PiccoloCfg, path: str | None = None) -> None:
 
 
 def _default_config_path() -> str:
-    return os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "config.yaml",
-    )
+    return default_config_path()
+
+
+def _cfg_to_dict(cfg: PiccoloCfg) -> dict[str, Any]:
+    return {
+        "display": asdict(cfg.display),
+        "cameras": {
+            "backend": cfg.cameras.backend,
+            "left": asdict(cfg.cameras.left),
+            "right": asdict(cfg.cameras.right),
+            "test_mode": cfg.cameras.test_mode,
+        },
+        "stereo": {
+            "zoom": asdict(cfg.stereo.zoom),
+            "convergence": asdict(cfg.stereo.convergence),
+            "alignment": asdict(cfg.stereo.alignment),
+            "aspect_mode": cfg.stereo.aspect_mode,
+        },
+        "calibration": asdict(cfg.calibration),
+        "calibration_state": asdict(cfg.calibration_state),
+        "controls": asdict(cfg.controls),
+        "stream": asdict(cfg.stream),
+    }

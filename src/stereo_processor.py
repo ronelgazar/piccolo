@@ -57,6 +57,9 @@ class StereoProcessor:
         self._sbs = np.empty((eye_height, eye_width * 2, 3), dtype=np.uint8)
         self._eye_l = self._sbs[:, :eye_width]       # view into left half
         self._eye_r = self._sbs[:, eye_width:]        # view into right half
+        self._full_fov_sbs = np.empty_like(self._sbs)
+        self._full_fov_eye_l = self._full_fov_sbs[:, :eye_width]
+        self._full_fov_eye_r = self._full_fov_sbs[:, eye_width:]
 
     # ------------------------------------------------------------------
     # Public helpers to drive from the input handler
@@ -76,6 +79,14 @@ class StereoProcessor:
 
     def zoom_out(self):
         self.zoom = max(self.zoom - self.cfg.zoom.step, self.cfg.zoom.min)
+
+    def reset_zoom(self):
+        """Reset digital zoom to no magnification.
+
+        Internally, 1.0 means user-facing zoom 0: the full camera frame is
+        shown with no crop. A literal 0.0 zoom would make the crop math invalid.
+        """
+        self.zoom = self.cfg.zoom.min
 
     def converge_in(self):
         prev_offset = self.base_offset
@@ -102,7 +113,7 @@ class StereoProcessor:
                 print(f"[Convergence] Prevented excessive convergence: only {n_matches} matches (min {min_matches})")
 
     def reset(self):
-        self.zoom = self.cfg.zoom.min
+        self.reset_zoom()
         self.base_offset = self.cfg.convergence.base_offset
 
     def set_joint_zoom_center(self, center: int):
@@ -200,6 +211,20 @@ class StereoProcessor:
         eye_l = self.process_eye(frame_l, "left", dst=self._eye_l)
         eye_r = self.process_eye(frame_r, "right", dst=self._eye_r)
         return eye_l, eye_r, self._sbs
+
+    def process_pair_full_fov(self, frame_l: np.ndarray, frame_r: np.ndarray) -> np.ndarray:
+        """Compose a full-FOV SBS frame for calibration views.
+
+        This intentionally ignores live zoom, convergence, and joint-center
+        crop. Overlay/physical calibration should start from the complete
+        camera view so users do not see a cropped slave just because normal
+        live viewing is zoomed in.
+        """
+        cv2.resize(frame_l, (self.eye_w, self.eye_h), dst=self._full_fov_eye_l,
+                   interpolation=cv2.INTER_LINEAR)
+        cv2.resize(frame_r, (self.eye_w, self.eye_h), dst=self._full_fov_eye_r,
+                   interpolation=cv2.INTER_LINEAR)
+        return self._full_fov_sbs
 
     def process_pair_joint_zoom(self, frame_l: np.ndarray, frame_r: np.ndarray):
         """Process both eyes using a joint zoom center (horizontal and vertical percent)."""

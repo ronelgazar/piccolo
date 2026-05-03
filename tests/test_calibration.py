@@ -37,3 +37,24 @@ def test_overlay_shift_eye_shifts_without_wrapping():
 
     assert shifted[:, :2].sum() == 0
     assert shifted[:, -1].sum() == 0
+
+
+def test_scale_eye_down_preserves_frame_size_and_centers_image():
+    img = np.full((10, 10, 3), 255, dtype=np.uint8)
+
+    out = CalibrationOverlay._scale_eye(img, 80)
+
+    assert out.shape == img.shape
+    assert out[0].sum() == 0
+    assert out[-1].sum() == 0
+    assert out[5, 5].sum() > 0
+
+
+def test_scale_eye_up_preserves_frame_size():
+    img = np.zeros((10, 10, 3), dtype=np.uint8)
+    img[2:8, 2:8] = 255
+
+    out = CalibrationOverlay._scale_eye(img, 120)
+
+    assert out.shape == img.shape
+    assert out.sum() > img.sum()

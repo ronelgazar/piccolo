@@ -50,8 +50,8 @@ The new pipeline:
 9. **Phase-correlation fallback** when the scene is too homogeneous for
    feature matching.
 
-10. Per-frame warp with **overlap mask** to prevent stereo edge artefacts
-    (unchanged from v2).
+10. Per-frame warp. Optional overlap masking can black pixels that are not
+    valid in both eyes, but it is disabled by default to preserve full FOV.
 """
 
 from __future__ import annotations
@@ -258,7 +258,7 @@ class StereoAligner:
                         borderMode=cv2.BORDER_CONSTANT,
                         borderValue=(0, 0, 0))
 
-        if self._overlap_mask_3ch is not None:
+        if self.cfg.mask_overlap and self._overlap_mask_3ch is not None:
             cv2.bitwise_and(self._dst_l, self._overlap_mask_3ch, dst=self._dst_l)
             cv2.bitwise_and(self._dst_r, self._overlap_mask_3ch, dst=self._dst_r)
 

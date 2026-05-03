@@ -63,6 +63,17 @@ def test_convergence_still_offsets_left_and_right_crops():
     assert left_eye.mean() > right_eye.mean()
 
 
+def test_reset_zoom_returns_to_no_magnification_without_touching_convergence():
+    p = _make_processor()
+    p.zoom = 2.0
+    p.base_offset = 12
+
+    p.reset_zoom()
+
+    assert p.zoom == 1.0
+    assert p.base_offset == 12
+
+
 def test_process_eye_preserves_output_aspect_before_resize():
     cfg = StereoCfg()
     cfg.aspect_mode = "crop"
@@ -94,3 +105,17 @@ def test_process_eye_full_aspect_keeps_camera_width():
     # Full mode uses the full 16:9 camera frame, so the left edge remains
     # visible instead of being cropped away for square-pixel geometry.
     assert out[:, 0].mean() > 0
+
+
+def test_full_fov_pair_ignores_live_zoom_crop():
+    cfg = StereoCfg()
+    p = StereoProcessor(cfg, eye_width=96, eye_height=108)
+    p.zoom = 2.0
+    frame = np.zeros((108, 192, 3), dtype=np.uint8)
+    frame[:, :20] = 255
+
+    live = p.process_eye(frame, "left")
+    full = p.process_pair_full_fov(frame, frame)[:, :96]
+
+    assert live[:, 0].mean() == 0
+    assert full[:, 0].mean() > 0

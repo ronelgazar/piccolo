@@ -49,11 +49,14 @@ class PipelineWorker(QThread):
         self.calibration.nudge_right = st.nudge_right_x
         self.calibration.nudge_left_y = st.nudge_left_y
         self.calibration.nudge_right_y = st.nudge_right_y
+        self.calibration.scale_left_pct = st.scale_left_pct
+        self.calibration.scale_right_pct = st.scale_right_pct
         self.processor.base_offset = st.convergence_offset
         if hasattr(self.processor, "set_joint_zoom_center"):
             self.processor.set_joint_zoom_center(st.joint_zoom_center)
         if hasattr(self.processor, "set_joint_zoom_center_y"):
             self.processor.set_joint_zoom_center_y(st.joint_zoom_center_y)
+        self.processor.reset_zoom()
 
         self.cam_l = None
         self.cam_r = None
@@ -146,6 +149,13 @@ class PipelineWorker(QThread):
             self.aligner.update(frame_l, frame_r)
         frame_l, frame_r = self.aligner.warp_pair(frame_l, frame_r)
 
+        raw_sbs = None
+        if self.raw_frame_requested and now - self._last_raw_emit_t >= self.raw_frame_interval:
+            # Calibration views need the full FOV and must ignore live zoom,
+            # convergence, saved nudges, and per-eye scale. Those are useful
+            # for normal viewing but make overlay calibration appear cropped.
+            raw_sbs = self.processor.process_pair_full_fov(frame_l, frame_r).copy()
+
         eye_l, eye_r, sbs = self.processor.process_pair(frame_l, frame_r)
         eye_l, eye_r = self.calibration.apply_nudge(eye_l, eye_r)
         sbs[:, :self.processor.eye_w] = eye_l
@@ -155,8 +165,8 @@ class PipelineWorker(QThread):
         # share the same QImage (Qt copy-on-write — cheap to fan out).
         # The ndarray emit feeds the calibration overlay system (slot
         # gates on visibility so it costs nothing when wizard tab is hidden).
-        if self.raw_frame_requested and now - self._last_raw_emit_t >= self.raw_frame_interval:
-            self.sbs_frame_ready.emit(sbs.copy())
+        if raw_sbs is not None:
+            self.sbs_frame_ready.emit(raw_sbs)
             self._last_raw_emit_t = now
         self.sbs_qimage_ready.emit(ndarray_to_qimage(sbs))
         if now - self._last_status_emit_t >= self._status_interval:
