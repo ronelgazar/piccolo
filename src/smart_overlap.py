@@ -151,3 +151,80 @@ def find_chessboard_pairs(
     else:
         zoom_ratio = None
     return pairs, zoom_ratio
+
+
+def find_live_pairs(
+    eye_l: np.ndarray,
+    eye_r: np.ndarray,
+    matcher,
+    pair_count: int,
+    min_inliers: int = 4,
+):
+    """Returns (pairs, zoom_ratio) for the live mode.
+
+    `matcher` is a StereoFeatureMatcher (passed in to avoid re-creating SIFT).
+    `zoom_ratio` is computed from the median pairwise-distance ratio between
+    inlier points, or None if there aren't at least 2 pairs.
+    """
+    import cv2
+    gray_l = cv2.cvtColor(eye_l, cv2.COLOR_BGR2GRAY) if eye_l.ndim == 3 else eye_l
+    gray_r = cv2.cvtColor(eye_r, cv2.COLOR_BGR2GRAY) if eye_r.ndim == 3 else eye_r
+
+    result = matcher.match(gray_l, gray_r)
+    n = len(result.pts_l)
+    if n < min_inliers:
+        return [], None
+
+    h, w = eye_l.shape[:2]
+    chosen = _sample_well_distributed(result.pts_l, pair_count, frame_w=w, frame_h=h)
+    pairs = [
+        OverlapPair(
+            index=-1,
+            color=(255, 255, 255),
+            left_xy=(float(result.pts_l[i, 0]), float(result.pts_l[i, 1])),
+            right_xy=(float(result.pts_r[i, 0]), float(result.pts_r[i, 1])),
+        )
+        for i in chosen
+    ]
+    zoom_ratio = _zoom_from_pair_distances(result.pts_l, result.pts_r)
+    return pairs, zoom_ratio
+
+
+def _sample_well_distributed(pts: np.ndarray, k: int, frame_w: int, frame_h: int) -> list[int]:
+    if len(pts) == 0:
+        return []
+    grid = max(1, int(math.ceil(math.sqrt(k))))
+    cell_w = frame_w / grid
+    cell_h = frame_h / grid
+    buckets: dict[tuple[int, int], list[int]] = {}
+    for i, (x, y) in enumerate(pts):
+        gx = min(int(x / cell_w), grid - 1)
+        gy = min(int(y / cell_h), grid - 1)
+        buckets.setdefault((gx, gy), []).append(i)
+    chosen: list[int] = []
+    # Prefer one per cell first
+    for indices in buckets.values():
+        chosen.append(indices[0])
+        if len(chosen) >= k:
+            break
+    # Top up from leftover indices if we still need more
+    if len(chosen) < k:
+        leftover = [i for indices in buckets.values() for i in indices[1:]]
+        chosen.extend(leftover[: k - len(chosen)])
+    return chosen[:k]
+
+
+def _zoom_from_pair_distances(pts_l: np.ndarray, pts_r: np.ndarray) -> Optional[float]:
+    n = len(pts_l)
+    if n < 2:
+        return None
+    ratios: list[float] = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            dl = float(np.hypot(pts_l[j, 0] - pts_l[i, 0], pts_l[j, 1] - pts_l[i, 1]))
+            dr = float(np.hypot(pts_r[j, 0] - pts_r[i, 0], pts_r[j, 1] - pts_r[i, 1]))
+            if dl > 5.0:
+                ratios.append(dr / dl)
+    if not ratios:
+        return None
+    return float(np.median(ratios))

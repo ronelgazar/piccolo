@@ -8,7 +8,9 @@ from src.smart_overlap import (
     compute_align_ok,
     compute_zoom_ok,
     find_chessboard_pairs,
+    find_live_pairs,
 )
+from src.stereo_matching import StereoFeatureMatcher
 
 
 def test_overlap_pair_holds_indices_color_and_xy():
@@ -89,3 +91,34 @@ def test_find_chessboard_pairs_detects_injected_scale(tmp_path):
     _, ratio = find_chessboard_pairs(img, img_r, pair_count=8)
     assert ratio is not None
     assert ratio < 0.95
+
+
+def _bgr_feature_pair(shift_y=3):
+    """Return BGR feature-rich pair (640x480)."""
+    rng = np.random.default_rng(11)
+    img_l = np.full((480, 640, 3), 80, dtype=np.uint8)
+    for _ in range(120):
+        x = int(rng.integers(20, 600))
+        y = int(rng.integers(20, 460))
+        img_l[y:y + 6, x:x + 6] = 255
+    img_r = np.roll(img_l, shift_y, axis=0)
+    return img_l, img_r
+
+
+def test_find_live_pairs_returns_at_most_K_pairs():
+    matcher = StereoFeatureMatcher(max_features=500, match_ratio=0.75,
+                                   ransac_thresh=2.0, frame_w=640, frame_h=480)
+    img_l, img_r = _bgr_feature_pair(shift_y=3)
+    pairs, zoom_ratio = find_live_pairs(img_l, img_r, matcher, pair_count=6)
+    assert 1 <= len(pairs) <= 6
+    assert zoom_ratio is not None
+    assert 0.85 < zoom_ratio < 1.15  # identical-scale roll -> ratio near 1
+
+
+def test_find_live_pairs_blank_returns_empty():
+    matcher = StereoFeatureMatcher(max_features=500, match_ratio=0.75,
+                                   ransac_thresh=2.0, frame_w=640, frame_h=480)
+    blank = np.full((480, 640, 3), 100, dtype=np.uint8)
+    pairs, zoom_ratio = find_live_pairs(blank, blank.copy(), matcher, pair_count=8)
+    assert pairs == []
+    assert zoom_ratio is None
