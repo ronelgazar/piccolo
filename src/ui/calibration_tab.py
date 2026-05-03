@@ -24,7 +24,7 @@ class CalibrationTab(QWidget):
     overlay_mode_changed = pyqtSignal(bool)
     overlay_frame_ready = pyqtSignal(object)  # QImage
     smart_overlap_mode_changed = pyqtSignal(bool)
-    smart_overlap_frame_ready = pyqtSignal(object)  # QImage
+    smart_overlap_metrics_ready = pyqtSignal(object)  # OverlapMetrics
     OVERLAY_SLAVE_OPACITY = 0.70
 
     def __init__(self, worker, parent=None):
@@ -438,8 +438,9 @@ class CalibrationTab(QWidget):
         self.lbl_vert = QLabel("Vert offset: --")
         self.lbl_rot = QLabel("Rotation: --")
         self.lbl_zoom = QLabel("Zoom ratio: --")
+        self.lbl_zoom_eye = QLabel("Bigger eye: --")
         self.lbl_pairs = QLabel("Match pairs: 0 / 0")
-        for w in (self.lbl_vert, self.lbl_rot, self.lbl_zoom, self.lbl_pairs):
+        for w in (self.lbl_vert, self.lbl_rot, self.lbl_zoom, self.lbl_zoom_eye, self.lbl_pairs):
             w.setStyleSheet("font-family: monospace;")
             readouts.addWidget(w)
         readouts.addStretch(1)
@@ -509,7 +510,7 @@ class CalibrationTab(QWidget):
         self._latest_metrics = result.metrics
         self.smart_preview.set_frame(result.image)
         if self._smart_active:
-            self.smart_overlap_frame_ready.emit(result.image)
+            self.smart_overlap_metrics_ready.emit(result.metrics)
         self._update_smart_readouts(result.metrics)
 
     def _update_smart_readouts(self, m: OverlapMetrics) -> None:
@@ -518,11 +519,13 @@ class CalibrationTab(QWidget):
             self.lbl_vert.setText("Vert offset: --")
             self.lbl_rot.setText("Rotation: --")
             self.lbl_zoom.setText("Zoom ratio: --")
+            self.lbl_zoom_eye.setText("Bigger eye: --")
         else:
             self.lbl_vert.setText(f"Vert offset: {m.vert_dy_px:+.1f} px")
             self.lbl_rot.setText(f"Rotation: {m.rotation_deg:+.2f} deg")
             zr = "--" if m.zoom_ratio is None else f"{m.zoom_ratio:.3f}"
             self.lbl_zoom.setText(f"Zoom ratio: {zr}")
+            self.lbl_zoom_eye.setText(self._zoom_eye_text(m.zoom_ratio))
         self.lbl_pairs.setText(f"Match pairs: {m.n_inliers} / {m.n_requested}")
 
         self._set_badge(self.lbl_align_badge, "ALIGN", m.align_ok, neutral=m.n_inliers == 0)
@@ -530,6 +533,16 @@ class CalibrationTab(QWidget):
         self.btn_apply_scale.setEnabled(
             self._smart_active and m.zoom_ratio is not None and m.n_inliers >= min_pairs
         )
+
+    def _zoom_eye_text(self, zoom_ratio: float | None) -> str:
+        if zoom_ratio is None:
+            return "Bigger eye: --"
+        tol = self.worker.cfg.smart_overlap.max_zoom_ratio_err if self.worker else 0.02
+        if abs(zoom_ratio - 1.0) <= tol:
+            return "Bigger eye: Even"
+        if zoom_ratio > 1.0:
+            return f"Bigger eye: Right (+{(zoom_ratio - 1.0) * 100:.1f}%)"
+        return f"Bigger eye: Left (+{((1.0 / zoom_ratio) - 1.0) * 100:.1f}%)"
 
     @staticmethod
     def _set_badge(label: QLabel, prefix: str, ok: bool, neutral: bool) -> None:

@@ -17,6 +17,7 @@ from ..stereo_processor import StereoProcessor
 from ..stereo_align import StereoAligner
 from ..calibration import CalibrationOverlay
 from ..input_handler import InputHandler, Action
+from ..smart_overlap import OverlapMetrics, render_overlay
 from .qt_helpers import ndarray_to_qimage
 
 
@@ -73,8 +74,18 @@ class PipelineWorker(QThread):
         self._last_raw_emit_t: float = 0.0
         self._last_status_emit_t: float = 0.0
         self._status_interval: float = 0.2
+        self._smart_overlap_active: bool = False
+        self._smart_overlap_metrics: OverlapMetrics | None = None
 
     # ------------------------------------------------------------------
+
+    def set_smart_overlap_overlay_active(self, active: bool) -> None:
+        self._smart_overlap_active = bool(active)
+        if not active:
+            self._smart_overlap_metrics = None
+
+    def set_smart_overlap_metrics(self, metrics: OverlapMetrics | None) -> None:
+        self._smart_overlap_metrics = metrics
 
     def run(self) -> None:
         try:
@@ -172,6 +183,8 @@ class PipelineWorker(QThread):
                 calibration_sbs = sbs.copy()
             self.sbs_frame_ready.emit(calibration_sbs)
             self._last_raw_emit_t = now
+        if self._smart_overlap_active and self._smart_overlap_metrics is not None:
+            sbs = render_overlay(sbs, self._smart_overlap_metrics)
         self.sbs_qimage_ready.emit(ndarray_to_qimage(sbs))
         if now - self._last_status_emit_t >= self._status_interval:
             self._emit_status()

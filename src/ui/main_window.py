@@ -45,8 +45,8 @@ class MainWindow(QMainWindow):
                 self.calibration_tab.overlay_frame_ready.connect(self._on_goovis_overlay_frame)
             if hasattr(self.calibration_tab, "smart_overlap_mode_changed"):
                 self.calibration_tab.smart_overlap_mode_changed.connect(self._on_smart_overlap_mode_changed)
-            if hasattr(self.calibration_tab, "smart_overlap_frame_ready"):
-                self.calibration_tab.smart_overlap_frame_ready.connect(self._on_goovis_smart_overlap_frame)
+            if hasattr(self.calibration_tab, "smart_overlap_metrics_ready"):
+                self.calibration_tab.smart_overlap_metrics_ready.connect(self._on_smart_overlap_metrics)
         else:
             self.goovis.deleteLater()
             self.goovis = None
@@ -85,6 +85,7 @@ class MainWindow(QMainWindow):
 
     def _on_smart_overlap_mode_changed(self, active: bool) -> None:
         self._smart_overlap_to_goovis = active
+        self.worker.set_smart_overlap_overlay_active(active)
 
     def _on_tab_changed(self, idx: int) -> None:
         self.worker.raw_frame_requested = self.tabs.widget(idx) is self.calibration_tab
@@ -99,7 +100,7 @@ class MainWindow(QMainWindow):
             return
         self.goovis.video.set_frame(image)
 
-    def _on_goovis_smart_overlap_frame(self, image) -> None:
-        if self.goovis is None or not self._smart_overlap_to_goovis:
+    def _on_smart_overlap_metrics(self, metrics) -> None:
+        if not self._smart_overlap_to_goovis:
             return
-        self.goovis.video.set_frame(image)
+        self.worker.set_smart_overlap_metrics(metrics)
