@@ -92,6 +92,8 @@ class CalibrationStateCfg:
     joint_zoom_center_y: int = 50
     scale_left_pct: int = 100
     scale_right_pct: int = 100
+    smart_overlap_mode: str = "chessboard"
+    smart_overlap_pair_count: int = 8
 
 
 @dataclass

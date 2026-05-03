@@ -137,3 +137,15 @@ def test_smart_overlap_overrides_from_yaml(tmp_path):
     assert cfg.smart_overlap.default_mode == "live"
     assert cfg.smart_overlap.pair_count == 12
     assert cfg.smart_overlap.max_vert_dy_px == 3.5
+
+
+def test_smart_overlap_mode_and_pair_count_persist(tmp_path):
+    p = tmp_path / "config.yaml"
+    cfg = load_config(str(p))
+    cfg.calibration_state.smart_overlap_mode = "live"
+    cfg.calibration_state.smart_overlap_pair_count = 12
+    save_calibration_state(cfg, path=str(p))
+
+    cfg2 = load_config(str(p))
+    assert cfg2.calibration_state.smart_overlap_mode == "live"
+    assert cfg2.calibration_state.smart_overlap_pair_count == 12
