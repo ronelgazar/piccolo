@@ -1,4 +1,4 @@
-"""Calibration tab: nudge sliders + physical-cal wizard."""
+"""Calibration tab: nudge sliders + Smart overlap calibration."""
 from __future__ import annotations
 
 import time
@@ -6,35 +6,53 @@ import time
 import cv2
 import numpy as np
 from PyQt6.QtCore import Qt, QTimer, pyqtSlot, pyqtSignal
-from PyQt6.QtGui import QImage, QKeyEvent, QShortcut, QKeySequence
+from PyQt6.QtGui import QKeyEvent, QShortcut, QKeySequence
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, QPushButton, QGroupBox,
     QComboBox, QSpinBox,
 )
 
 from ..config_state import save_calibration_state
-from ..physical_cal import GridPairMetrics, PhysicalCalSession
+from ..smart_overlap import OverlapMetrics, SmartOverlapAnalyzer
+from ..stereo_matching import StereoFeatureMatcher
 from .qt_helpers import ndarray_to_qimage
-from .physical_cal_worker import PhysicalCalResult, PhysicalCalWorker
+from .smart_overlap_worker import SmartOverlapResult, SmartOverlapWorker
 from .video_widget import VideoWidget
 
 
 class CalibrationTab(QWidget):
     overlay_mode_changed = pyqtSignal(bool)
     overlay_frame_ready = pyqtSignal(object)  # QImage
-    physical_mode_changed = pyqtSignal(bool)
-    physical_frame_ready = pyqtSignal(object)  # QImage
     OVERLAY_SLAVE_OPACITY = 0.70
 
     def __init__(self, worker, parent=None):
         super().__init__(parent)
         self.worker = worker
-        self.session = PhysicalCalSession()
-        self.physical_worker = PhysicalCalWorker(self)
-        self.physical_worker.result_ready.connect(self._on_physical_result)
-        self.physical_worker.start()
-        self._latest_status: dict = {}
-        self._physical_active = False
+        cfg_so = worker.cfg.smart_overlap if worker is not None else None
+        state = worker.cfg.calibration_state if worker is not None else None
+
+        eye_w = worker.cfg.cameras.left.width if worker is not None else 1920
+        eye_h = worker.cfg.cameras.left.height if worker is not None else 1080
+
+        matcher = StereoFeatureMatcher(
+            max_features=500, match_ratio=0.75, ransac_thresh=2.0,
+            frame_w=eye_w, frame_h=eye_h,
+        )
+        analyzer = SmartOverlapAnalyzer(
+            max_vert_dy_px=cfg_so.max_vert_dy_px if cfg_so else 5.0,
+            max_rotation_deg=cfg_so.max_rotation_deg if cfg_so else 0.5,
+            max_zoom_ratio_err=cfg_so.max_zoom_ratio_err if cfg_so else 0.02,
+            min_pairs_for_metrics=cfg_so.min_pairs_for_metrics if cfg_so else 4,
+            pair_stability_tol_px=cfg_so.pair_stability_tol_px if cfg_so else 30.0,
+            matcher=matcher,
+        )
+        self.smart_overlap_worker = SmartOverlapWorker(analyzer, self)
+        self.smart_overlap_worker.result_ready.connect(self._on_smart_overlap_result)
+        self.smart_overlap_worker.start()
+        self._smart_active = False
+        self._smart_mode = (state.smart_overlap_mode if state else "chessboard")
+        self._smart_pair_count = (state.smart_overlap_pair_count if state else 8)
+        self._latest_metrics: OverlapMetrics | None = None
         self._overlay_active = False
         self._overlay_master = "left"
         self._overlay_slave_x = 0
@@ -43,7 +61,6 @@ class CalibrationTab(QWidget):
         self._overlay_last_sbs: np.ndarray | None = None
         self._overlay_flash_timer = QTimer(self)
         self._overlay_flash_timer.timeout.connect(self._toggle_overlay_flash)
-        self._latest_grid_metrics: GridPairMetrics | None = None
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._overlay_shortcuts: list[QShortcut] = []
         self._init_overlay_shortcuts()
@@ -52,12 +69,11 @@ class CalibrationTab(QWidget):
         root.addWidget(self._make_nudge_group())
         root.addWidget(self._make_reset_row())
         root.addWidget(self._make_overlay_cal_group())
-        root.addWidget(self._make_wizard_group(), stretch=1)
+        root.addWidget(self._make_smart_overlap_group(), stretch=1)
 
         self._last_wizard_render_t: float = 0.0
         if worker is not None:
-            worker.sbs_frame_ready.connect(self._on_frame_for_wizard)
-            worker.status_tick.connect(self._on_status_for_wizard)
+            worker.sbs_frame_ready.connect(self._on_frame_for_smart_overlap)
 
     # ------------------ Nudge sliders ----------------------------------
 
@@ -196,8 +212,8 @@ class CalibrationTab(QWidget):
         if self._overlay_active:
             self._cancel_overlay_mode()
             return
-        if self._physical_active:
-            self._stop_physical_mode()
+        if self._smart_active:
+            self._stop_smart_mode()
         self._overlay_active = True
         self._update_worker_raw_rate()
         self._overlay_flash_on = True
@@ -407,224 +423,180 @@ class CalibrationTab(QWidget):
             return
         super().keyPressEvent(event)
 
-    # ------------------ Wizard -----------------------------------------
+    # ------------------ Smart overlap calibration ----------------------
 
-    def _make_wizard_group(self) -> QGroupBox:
-        box = QGroupBox("Physical calibration wizard", self)
+    def _make_smart_overlap_group(self) -> QGroupBox:
+        box = QGroupBox("Smart overlap calibration", self)
         lay = QVBoxLayout(box)
-        self.wizard_preview = VideoWidget(box)
-        lay.addWidget(self.wizard_preview, stretch=1)
-        self.wizard_instruction_lbl = QLabel("")
-        self.wizard_instruction_lbl.setWordWrap(True)
-        self.wizard_instruction_lbl.setStyleSheet("font-family: monospace;")
-        lay.addWidget(self.wizard_instruction_lbl)
-        btns = QHBoxLayout()
-        self.wizard_phase_lbl = QLabel("Phase: Brightness (1/5)")
-        self.wizard_readout_lbl = QLabel("")
-        self.wizard_readout_lbl.setStyleSheet("font-family: monospace;")
-        self.btn_physical_start = QPushButton("Start physical calibration")
-        self.btn_physical_start.clicked.connect(self._toggle_physical_mode)
+        self.smart_preview = VideoWidget(box)
+        lay.addWidget(self.smart_preview, stretch=1)
+
+        readouts = QHBoxLayout()
+        self.lbl_vert = QLabel("Vert offset: --")
+        self.lbl_rot = QLabel("Rotation: --")
+        self.lbl_zoom = QLabel("Zoom ratio: --")
+        self.lbl_pairs = QLabel("Match pairs: 0 / 0")
+        for w in (self.lbl_vert, self.lbl_rot, self.lbl_zoom, self.lbl_pairs):
+            w.setStyleSheet("font-family: monospace;")
+            readouts.addWidget(w)
+        readouts.addStretch(1)
+        lay.addLayout(readouts)
+
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("Mode:"))
+        self.mode_combo = QComboBox(box)
+        self.mode_combo.addItems(["Chessboard", "Live scene"])
+        self.mode_combo.setCurrentIndex(0 if self._smart_mode == "chessboard" else 1)
+        self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+        controls.addWidget(self.mode_combo)
+
+        controls.addSpacing(12)
+        controls.addWidget(QLabel("Pairs:"))
+        self.pair_spin = QSpinBox(box)
+        self.pair_spin.setRange(4, 20)
+        self.pair_spin.setValue(self._smart_pair_count)
+        self.pair_spin.valueChanged.connect(self._on_pair_count_changed)
+        controls.addWidget(self.pair_spin)
+
+        controls.addSpacing(12)
+        self.lbl_align_badge = QLabel("ALIGN --")
+        self.lbl_zoom_badge = QLabel("ZOOM --")
+        for w in (self.lbl_align_badge, self.lbl_zoom_badge):
+            w.setStyleSheet("font-family: monospace; padding: 2px 6px; border-radius: 3px;")
+            controls.addWidget(w)
+
+        controls.addStretch(1)
+        self.btn_smart_start = QPushButton("Start")
+        self.btn_smart_start.clicked.connect(self._toggle_smart_mode)
+        controls.addWidget(self.btn_smart_start)
+
         self.btn_apply_scale = QPushButton("Apply detected scale")
-        self.btn_apply_scale.clicked.connect(self._apply_detected_scale)
         self.btn_apply_scale.setEnabled(False)
-        self.btn_prev = QPushButton("← Prev")
-        self.btn_next = QPushButton("Next →")
-        self.btn_prev.clicked.connect(self._wizard_prev)
-        self.btn_next.clicked.connect(self._wizard_next)
-        btns.addWidget(self.btn_physical_start)
-        btns.addWidget(self.btn_apply_scale)
-        btns.addSpacing(12)
-        btns.addWidget(self.btn_prev)
-        btns.addWidget(self.btn_next)
-        btns.addSpacing(20)
-        btns.addWidget(self.wizard_phase_lbl)
-        btns.addStretch(1)
-        btns.addWidget(self.wizard_readout_lbl)
-        lay.addLayout(btns)
+        self.btn_apply_scale.clicked.connect(self._apply_detected_scale)
+        controls.addWidget(self.btn_apply_scale)
+
+        lay.addLayout(controls)
         return box
 
-    @pyqtSlot(dict)
-    def _on_status_for_wizard(self, st: dict) -> None:
-        self._latest_status = st
-
     @pyqtSlot(object)
-    def _on_frame_for_wizard(self, sbs) -> None:
-        # Skip work entirely if this tab isn't visible — avoids wasting CPU
-        # re-processing camera frames while the user is on Live or Settings.
+    def _on_frame_for_smart_overlap(self, sbs) -> None:
         if not self.isVisible():
             return
-        # Grid detection is intentionally slow-path UI work. Keep it low-rate
-        # so the main display/Goovis feed is not starved by calibration.
         now = time.perf_counter()
-        interval = 0.1 if self._overlay_active else 0.2 if self._physical_active else 1.0
+        interval = 0.1 if self._overlay_active else (0.2 if self._smart_active else 1.0)
         if now - self._last_wizard_render_t < interval:
             return
         self._last_wizard_render_t = now
         if self._overlay_active:
-            # sbs is the worker's reused buffer; copy so subsequent ticks
-            # don't overwrite the pixels while we're rendering.
             self._overlay_last_sbs = sbs.copy()
             self._render_overlay_preview(self._overlay_last_sbs)
             return
+        if not self._smart_active:
+            return
         if sbs is None or sbs.ndim != 3 or sbs.shape[2] != 3:
             return
-        self.physical_worker.submit(sbs, self.session.phase, self._latest_status)
+        self.smart_overlap_worker.submit(sbs, self._smart_mode, self._smart_pair_count)
 
     @pyqtSlot(object)
-    def _on_physical_result(self, result: PhysicalCalResult) -> None:
-        if result.phase != self.session.phase:
-            return
-        self._latest_grid_metrics = result.metrics
+    def _on_smart_overlap_result(self, result: SmartOverlapResult) -> None:
+        self._latest_metrics = result.metrics
+        self.smart_preview.set_frame(result.image)
+        self._update_smart_readouts(result.metrics)
+
+    def _update_smart_readouts(self, m: OverlapMetrics) -> None:
+        min_pairs = self.worker.cfg.smart_overlap.min_pairs_for_metrics if self.worker else 4
+        if m.n_inliers < min_pairs:
+            self.lbl_vert.setText("Vert offset: --")
+            self.lbl_rot.setText("Rotation: --")
+            self.lbl_zoom.setText("Zoom ratio: --")
+        else:
+            self.lbl_vert.setText(f"Vert offset: {m.vert_dy_px:+.1f} px")
+            self.lbl_rot.setText(f"Rotation: {m.rotation_deg:+.2f} deg")
+            zr = "--" if m.zoom_ratio is None else f"{m.zoom_ratio:.3f}"
+            self.lbl_zoom.setText(f"Zoom ratio: {zr}")
+        self.lbl_pairs.setText(f"Match pairs: {m.n_inliers} / {m.n_requested}")
+
+        self._set_badge(self.lbl_align_badge, "ALIGN", m.align_ok, neutral=m.n_inliers == 0)
+        self._set_badge(self.lbl_zoom_badge, "ZOOM", m.zoom_ok, neutral=m.zoom_ratio is None)
         self.btn_apply_scale.setEnabled(
-            self.session.phase == "scale" and result.metrics.zoom_ratio is not None
+            self._smart_active and m.zoom_ratio is not None and m.n_inliers >= min_pairs
         )
-        self.wizard_preview.set_frame(result.image)
-        if self._physical_active:
-            self.physical_frame_ready.emit(result.image)
-        self._update_wizard_readout(
-            result.sharp_l,
-            result.sharp_r,
-            None,
-            None,
-            result.metrics,
-            result.focus_ok,
-            result.best_l,
-            result.best_r,
-        )
+
+    @staticmethod
+    def _set_badge(label: QLabel, prefix: str, ok: bool, neutral: bool) -> None:
+        if neutral:
+            label.setText(f"{prefix} --")
+            label.setStyleSheet("font-family: monospace; padding: 2px 6px; border-radius: 3px;"
+                                "background: #2a2a2a; color: #aaa;")
+            return
+        if ok:
+            label.setText(f"{prefix} OK")
+            label.setStyleSheet("font-family: monospace; padding: 2px 6px; border-radius: 3px;"
+                                "background: #2d6a3d; color: #fff;")
+        else:
+            label.setText(f"{prefix} ADJUST")
+            label.setStyleSheet("font-family: monospace; padding: 2px 6px; border-radius: 3px;"
+                                "background: #8a4a1a; color: #fff;")
 
     def stop_background_work(self) -> None:
-        self._stop_physical_mode()
-        self.physical_worker.stop()
+        self._stop_smart_mode()
+        self.smart_overlap_worker.stop()
 
-    def _toggle_physical_mode(self) -> None:
-        if self._physical_active:
-            self._stop_physical_mode()
-            return
-        self._start_physical_mode()
-
-    def _start_physical_mode(self) -> None:
+    def _toggle_smart_mode(self) -> None:
         if self.worker is None:
             return
+        if self._smart_active:
+            self._stop_smart_mode()
+        else:
+            self._start_smart_mode()
+
+    def _start_smart_mode(self) -> None:
         if self._overlay_active:
             self._cancel_overlay_mode()
-        self._physical_active = True
-        self.btn_physical_start.setText("Stop physical calibration")
-        self.physical_mode_changed.emit(True)
+        self._smart_active = True
+        self.btn_smart_start.setText("Stop")
         self._update_worker_raw_rate()
 
-    def _stop_physical_mode(self) -> None:
-        if not self._physical_active:
+    def _stop_smart_mode(self) -> None:
+        if not self._smart_active:
             return
-        self._physical_active = False
-        self.btn_physical_start.setText("Start physical calibration")
-        self.physical_mode_changed.emit(False)
+        self._smart_active = False
+        self.btn_smart_start.setText("Start")
+        self.smart_overlap_worker.reset_state()
+        self.btn_apply_scale.setEnabled(False)
         self._update_worker_raw_rate()
+
+    def _on_mode_changed(self, idx: int) -> None:
+        self._smart_mode = "chessboard" if idx == 0 else "live"
+        self.smart_overlap_worker.reset_state()
+        if self.worker is not None:
+            self.worker.cfg.calibration_state.smart_overlap_mode = self._smart_mode
+            save_calibration_state(self.worker.cfg)
+
+    def _on_pair_count_changed(self, value: int) -> None:
+        self._smart_pair_count = int(value)
+        self.smart_overlap_worker.reset_state()
+        if self.worker is not None:
+            self.worker.cfg.calibration_state.smart_overlap_pair_count = int(value)
+            save_calibration_state(self.worker.cfg)
 
     def _update_worker_raw_rate(self) -> None:
         if self.worker is None:
             return
         if self._overlay_active:
             self.worker.raw_frame_interval = 0.1
-        elif self._physical_active:
+        elif self._smart_active:
             self.worker.raw_frame_interval = 0.2
         else:
             self.worker.raw_frame_interval = 1.0
 
-    def _update_wizard_readout(
-        self,
-        sl,
-        sr,
-        dy,
-        dt,
-        metrics: GridPairMetrics | None = None,
-        focus_ok: bool | None = None,
-        best_l: float | None = None,
-        best_r: float | None = None,
-    ):
-        phase = self.session.phase
-        self.wizard_phase_lbl.setText(
-            f"Phase: {phase.capitalize()} ({self.session.phase_index + 1}/{self.session.total_phases})"
-        )
-        self.wizard_instruction_lbl.setText(_phase_instruction(phase))
-        if phase == "brightness" and metrics is not None:
-            if metrics.left.brightness is None or metrics.right.brightness is None:
-                self.wizard_readout_lbl.setText("grid=--")
-            else:
-                delta = metrics.right.brightness - metrics.left.brightness
-                self.wizard_readout_lbl.setText(
-                    f"{_ok(metrics.brightness_ok())} bright L={metrics.left.brightness:.0f} R={metrics.right.brightness:.0f} d={delta:+.0f}"
-                )
-        elif phase == "focus":
-            peak_txt = ""
-            if best_l is not None and best_r is not None:
-                peak_txt = f" peak L={best_l:.0f} R={best_r:.0f}"
-            self.wizard_readout_lbl.setText(f"{_ok(bool(focus_ok))} sharp L={sl:.0f} R={sr:.0f}{peak_txt}")
-        elif phase == "scale" and metrics is not None:
-            ratio = metrics.zoom_ratio
-            if ratio is None:
-                self.wizard_readout_lbl.setText("grid=--")
-            else:
-                self.wizard_readout_lbl.setText(
-                    f"{_ok(metrics.zoom_ok())} {metrics.zoom_status()} "
-                    f"err={metrics.zoom_error_pct:+.1f}%  "
-                    f"L={metrics.left.square_px:.1f}px R={metrics.right.square_px:.1f}px  {_zoom_hint(metrics)}"
-                )
-        elif phase == "horizontal":
-            grid_dy = metrics.vertical_delta_px if metrics is not None else None
-            self.wizard_readout_lbl.setText(f"{_ok(metrics.vertical_ok() if metrics else False)} grid dy={grid_dy:+.1f}px" if grid_dy is not None else "grid dy=--")
-        elif phase == "rotation":
-            grid_rot = metrics.rotation_delta_deg if metrics is not None else None
-            self.wizard_readout_lbl.setText(f"{_ok(metrics.rotation_ok() if metrics else False)} grid rot={grid_rot:+.2f}°" if grid_rot is not None else "grid rot=--")
-        else:
-            self.wizard_readout_lbl.setText("")
-
-    def _wizard_next(self) -> None:
-        self.session.next_phase()
-        self.btn_apply_scale.setEnabled(False)
-
-    def _wizard_prev(self) -> None:
-        self.session.prev_phase()
-        self.btn_apply_scale.setEnabled(False)
-
     def _apply_detected_scale(self) -> None:
-        metrics = self._latest_grid_metrics
+        metrics = self._latest_metrics
         if self.worker is None or metrics is None or metrics.zoom_ratio is None:
             return
-        # Keep left as the reference. If the right image is larger, this
-        # scales it down. If it is smaller, this scales it up. Mechanical lens
-        # matching is still preferred, but this removes residual mismatch.
         right_scale = int(round(100.0 / metrics.zoom_ratio))
         right_scale = max(80, min(120, right_scale))
         self.sld_lscale.setValue(100)
         self.sld_rscale.setValue(right_scale)
         self._on_lscale(100)
         self._on_rscale(right_scale)
-
-
-def _ok(value: bool) -> str:
-    return "OK" if value else "ADJUST"
-
-
-def _phase_instruction(phase: str) -> str:
-    if phase == "brightness":
-        return "Brightness: place the printed grid under both cameras and match exposure/brightness with no clipped whites or blacks."
-    if phase == "focus":
-        return "Focus: adjust each lens until sharpness peaks while the grid is detected in both eyes."
-    if phase == "scale":
-        return "Mechanical zoom: adjust lens zoom until detected grid square size is equal in both eyes."
-    if phase == "horizontal":
-        return "Vertical alignment: adjust camera height/tilt until grid vertical offset approaches 0 px."
-    if phase == "rotation":
-        return "Rotation: rotate the camera mounts until grid row-angle difference approaches 0 degrees."
-    return ""
-
-
-def _zoom_hint(metrics: GridPairMetrics) -> str:
-    ratio = metrics.zoom_ratio
-    if ratio is None:
-        return ""
-    if metrics.zoom_ok():
-        return "zoom matched"
-    if ratio > 1.0:
-        return "right larger"
-    return "left larger"
