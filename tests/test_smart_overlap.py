@@ -229,8 +229,20 @@ def test_pair_stability_smooths_position_jitter():
     a._previous = a._assign_colors_and_indices(first)
     smoothed = a._assign_colors_and_indices(second)[0]
     assert smoothed.index == 0
-    assert smoothed.left_xy == (102.0, 100.0)
-    assert smoothed.right_xy == (122.0, 101.0)
+    assert smoothed.left_xy == (100.8, 100.0)
+    assert smoothed.right_xy == (120.8, 101.0)
+
+
+def test_live_analyzer_limits_display_pairs_after_internal_oversampling():
+    img_l, img_r = _bgr_feature_pair(shift_y=2)
+    matcher = StereoFeatureMatcher(max_features=500, match_ratio=0.75,
+                                   ransac_thresh=2.0, frame_w=640, frame_h=480)
+    a = SmartOverlapAnalyzer(
+        max_vert_dy_px=5.0, max_rotation_deg=0.5, max_zoom_ratio_err=0.02,
+        min_pairs_for_metrics=4, pair_stability_tol_px=30, matcher=matcher,
+    )
+    m = a.analyze(img_l, img_r, mode="live", pair_count=6)
+    assert len(m.pairs) <= 6
 
 
 def test_render_overlay_returns_same_shape_image_with_markers_drawn(tmp_path):

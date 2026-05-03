@@ -231,7 +231,7 @@ def _zoom_from_pair_distances(pts_l: np.ndarray, pts_r: np.ndarray) -> Optional[
 
 
 _PALETTE_SIZE = 20  # max user-tunable pair count is 20
-_PAIR_POSITION_SMOOTHING = 0.75
+_PAIR_POSITION_SMOOTHING = 0.90
 
 
 def _build_palette(n: int) -> list[Tuple[int, int, int]]:
@@ -280,7 +280,8 @@ class SmartOverlapAnalyzer:
         elif mode == "live":
             if self.matcher is None:
                 raise RuntimeError("live mode requires a matcher")
-            raw, zoom_ratio = find_live_pairs(eye_l, eye_r, self.matcher, pair_count,
+            candidate_count = min(_PALETTE_SIZE, max(pair_count * 4, pair_count))
+            raw, zoom_ratio = find_live_pairs(eye_l, eye_r, self.matcher, candidate_count,
                                               min_inliers=self.min_pairs_for_metrics)
         else:
             raise ValueError(f"unknown mode: {mode}")
@@ -294,6 +295,11 @@ class SmartOverlapAnalyzer:
             )
 
         pairs = self._assign_colors_and_indices(raw)
+        if len(pairs) > pair_count:
+            previous_indices = {p.index for p in self._previous}
+            stable = [p for p in pairs if p.index in previous_indices]
+            fresh = [p for p in pairs if p.index not in previous_indices]
+            pairs = (stable + fresh)[:pair_count]
         self._previous = pairs
 
         # Metrics
