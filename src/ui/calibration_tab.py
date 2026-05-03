@@ -490,7 +490,7 @@ class CalibrationTab(QWidget):
         if not self.isVisible():
             return
         now = time.perf_counter()
-        interval = 0.1 if self._overlay_active else (0.2 if self._smart_active else 1.0)
+        interval = 0.1 if self._overlay_active else (0.5 if self._smart_active else 1.0)
         if now - self._last_wizard_render_t < interval:
             return
         self._last_wizard_render_t = now
@@ -601,7 +601,7 @@ class CalibrationTab(QWidget):
         if self._overlay_active:
             self.worker.raw_frame_interval = 0.1
         elif self._smart_active:
-            self.worker.raw_frame_interval = 0.2
+            self.worker.raw_frame_interval = 0.5
         else:
             self.worker.raw_frame_interval = 1.0
 

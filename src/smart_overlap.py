@@ -76,15 +76,10 @@ def _detect_grid_pattern(img, inner_cols=9, inner_rows=6, max_dim=720):
     h, w = img.shape[:2]
     largest = max(h, w)
     if largest <= max_dim:
-        detected = detect_grid(img, inner_cols=inner_cols, inner_rows=inner_rows, exhaustive=False)
-        if detected is not None:
-            return detected
-        return detect_grid(img, inner_cols=inner_cols, inner_rows=inner_rows, exhaustive=True)
+        return detect_grid(img, inner_cols=inner_cols, inner_rows=inner_rows, exhaustive=False)
     scale = max_dim / largest
     small = _resize_for_detect(img, scale)
     detected = detect_grid(small, inner_cols=inner_cols, inner_rows=inner_rows, exhaustive=False)
-    if detected is None:
-        detected = detect_grid(small, inner_cols=inner_cols, inner_rows=inner_rows, exhaustive=True)
     if detected is None:
         return None
     corners = detected.corners / scale
@@ -98,21 +93,26 @@ def _detect_grid(img, inner_cols=9, inner_rows=6, max_dim=720):
 
 
 def _detect_matching_grid_pair(eye_l, eye_r, inner_cols=9, inner_rows=6):
-    det_l = _detect_grid(eye_l, inner_cols=inner_cols, inner_rows=inner_rows)
-    det_r = _detect_grid(eye_r, inner_cols=inner_cols, inner_rows=inner_rows)
-    if det_l is not None and det_r is not None:
-        return det_l, det_r, inner_cols, inner_rows
-
     # Zoomed views often crop the printable 9x6 board. OpenCV can still
     # detect a smaller visible sub-board if both eyes contain the same region.
-    for cols in range(inner_cols - 1, 3, -1):
-        for rows in range(inner_rows - 1, 2, -1):
-            det_l = _detect_grid(eye_l, inner_cols=cols, inner_rows=rows)
-            if det_l is None:
-                continue
-            det_r = _detect_grid(eye_r, inner_cols=cols, inner_rows=rows)
-            if det_r is not None:
-                return det_l, det_r, cols, rows
+    candidates = [
+        (inner_cols, inner_rows),
+        (max(4, inner_cols - 1), max(3, inner_rows - 1)),
+        (max(4, inner_cols - 1), max(3, inner_rows - 2)),
+        (max(4, inner_cols - 2), max(3, inner_rows - 1)),
+        (max(4, inner_cols - 2), max(3, inner_rows - 2)),
+    ]
+    seen: set[tuple[int, int]] = set()
+    for cols, rows in candidates:
+        if (cols, rows) in seen:
+            continue
+        seen.add((cols, rows))
+        det_l = _detect_grid(eye_l, inner_cols=cols, inner_rows=rows)
+        if det_l is None:
+            continue
+        det_r = _detect_grid(eye_r, inner_cols=cols, inner_rows=rows)
+        if det_r is not None:
+            return det_l, det_r, cols, rows
     return None, None, inner_cols, inner_rows
 
 
