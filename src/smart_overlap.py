@@ -9,6 +9,7 @@ markers and connecting threads onto a side-by-side BGR frame.
 """
 from __future__ import annotations
 
+import colorsys
 import math
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
@@ -16,6 +17,7 @@ from typing import Optional, Tuple
 import numpy as np
 
 from .physical_grid_calibration import GridDetection
+from .stereo_matching import theil_sen
 # Imported lazily inside the function to keep top-level imports light:
 #   from .physical_cal import _detect_grid_scaled, estimate_square_px
 
@@ -228,3 +230,113 @@ def _zoom_from_pair_distances(pts_l: np.ndarray, pts_r: np.ndarray) -> Optional[
     if not ratios:
         return None
     return float(np.median(ratios))
+
+
+_PALETTE_SIZE = 20  # max user-tunable pair count is 20
+
+
+def _build_palette(n: int) -> list[Tuple[int, int, int]]:
+    """Generate n visually distinct BGR colours via HSV spacing."""
+    out = []
+    for i in range(n):
+        h = (i / n) % 1.0
+        r, g, b = colorsys.hsv_to_rgb(h, 0.85, 1.0)
+        out.append((int(b * 255), int(g * 255), int(r * 255)))
+    return out
+
+
+class SmartOverlapAnalyzer:
+    """Diagnostic stereo overlap analysis. Holds previous-frame pairs for stability."""
+
+    def __init__(
+        self,
+        max_vert_dy_px: float,
+        max_rotation_deg: float,
+        max_zoom_ratio_err: float,
+        min_pairs_for_metrics: int,
+        pair_stability_tol_px: float,
+        matcher,                                    # StereoFeatureMatcher | None
+    ):
+        self.max_vert_dy_px = float(max_vert_dy_px)
+        self.max_rotation_deg = float(max_rotation_deg)
+        self.max_zoom_ratio_err = float(max_zoom_ratio_err)
+        self.min_pairs_for_metrics = int(min_pairs_for_metrics)
+        self.pair_stability_tol_px = float(pair_stability_tol_px)
+        self.matcher = matcher
+        self._palette = _build_palette(_PALETTE_SIZE)
+        self._previous: list[OverlapPair] = []
+
+    def reset(self) -> None:
+        self._previous = []
+
+    def analyze(
+        self,
+        eye_l: np.ndarray,
+        eye_r: np.ndarray,
+        mode: str,
+        pair_count: int,
+    ) -> OverlapMetrics:
+        if mode == "chessboard":
+            raw, zoom_ratio = find_chessboard_pairs(eye_l, eye_r, pair_count)
+        elif mode == "live":
+            if self.matcher is None:
+                raise RuntimeError("live mode requires a matcher")
+            raw, zoom_ratio = find_live_pairs(eye_l, eye_r, self.matcher, pair_count,
+                                              min_inliers=self.min_pairs_for_metrics)
+        else:
+            raise ValueError(f"unknown mode: {mode}")
+
+        if not raw:
+            self._previous = []
+            return OverlapMetrics(
+                mode=mode, pairs=[], vert_dy_px=0.0, rotation_deg=0.0,
+                zoom_ratio=zoom_ratio, n_inliers=0, n_requested=pair_count,
+                align_ok=False, zoom_ok=False,
+            )
+
+        pairs = self._assign_colors_and_indices(raw)
+        self._previous = pairs
+
+        # Metrics
+        h_w_cx = self._frame_cx(eye_l)
+        x_centered = np.array([p.left_xy[0] - h_w_cx for p in pairs])
+        dy = np.array([p.right_xy[1] - p.left_xy[1] for p in pairs])
+        slope, dy_off, _ = theil_sen(x_centered, dy)
+        vert_dy = float(dy_off)
+        rotation_deg = float(math.degrees(slope))
+
+        align_ok = compute_align_ok(
+            vert_dy, rotation_deg, len(pairs),
+            self.max_vert_dy_px, self.max_rotation_deg, self.min_pairs_for_metrics,
+        )
+        zoom_ok = compute_zoom_ok(
+            zoom_ratio, len(pairs),
+            self.max_zoom_ratio_err, self.min_pairs_for_metrics,
+        )
+        return OverlapMetrics(
+            mode=mode, pairs=pairs, vert_dy_px=vert_dy, rotation_deg=rotation_deg,
+            zoom_ratio=zoom_ratio, n_inliers=len(pairs), n_requested=pair_count,
+            align_ok=align_ok, zoom_ok=zoom_ok,
+        )
+
+    # --- internals ---------------------------------------------------------
+
+    @staticmethod
+    def _frame_cx(eye_l: np.ndarray) -> float:
+        return eye_l.shape[1] / 2.0
+
+    def _assign_colors_and_indices(self, raw: list[OverlapPair]) -> list[OverlapPair]:
+        """Stage 1: simple sequential assignment from the palette.
+
+        Stability tracking (Task 8) replaces this with previous-frame inheritance.
+        """
+        out: list[OverlapPair] = []
+        for i, p in enumerate(raw):
+            colour = self._palette[i % len(self._palette)]
+            out.append(OverlapPair(
+                index=i,
+                color=colour,
+                left_xy=p.left_xy,
+                right_xy=p.right_xy,
+            ))
+        return out

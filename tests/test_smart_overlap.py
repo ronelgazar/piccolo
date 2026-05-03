@@ -5,6 +5,7 @@ from src.physical_grid_calibration import generate_chessboard_page
 from src.smart_overlap import (
     OverlapPair,
     OverlapMetrics,
+    SmartOverlapAnalyzer,
     compute_align_ok,
     compute_zoom_ok,
     find_chessboard_pairs,
@@ -122,3 +123,63 @@ def test_find_live_pairs_blank_returns_empty():
     pairs, zoom_ratio = find_live_pairs(blank, blank.copy(), matcher, pair_count=8)
     assert pairs == []
     assert zoom_ratio is None
+
+
+def test_analyzer_chessboard_identical_eyes_metrics_near_zero(tmp_path):
+    img = _render_grid_eye(tmp_path)
+    a = SmartOverlapAnalyzer(
+        max_vert_dy_px=5.0, max_rotation_deg=0.5, max_zoom_ratio_err=0.02,
+        min_pairs_for_metrics=4, pair_stability_tol_px=30,
+        matcher=None,
+    )
+    m = a.analyze(img, img.copy(), mode="chessboard", pair_count=8)
+    assert m.mode == "chessboard"
+    assert m.n_inliers == 8
+    assert abs(m.vert_dy_px) < 1.0
+    assert abs(m.rotation_deg) < 0.2
+    assert m.align_ok is True
+    assert m.zoom_ok is True
+    # Colours assigned, indices 0..7
+    assert sorted(p.index for p in m.pairs) == list(range(8))
+    assert all(p.color != (255, 255, 255) for p in m.pairs)
+
+
+def test_analyzer_chessboard_injected_vertical_offset(tmp_path):
+    img = _render_grid_eye(tmp_path)
+    h, w = img.shape[:2]
+    M = np.float32([[1, 0, 0], [0, 1, 8]])  # shift right eye down 8 px
+    img_r = cv2.warpAffine(img, M, (w, h), borderValue=(255, 255, 255))
+    a = SmartOverlapAnalyzer(
+        max_vert_dy_px=5.0, max_rotation_deg=0.5, max_zoom_ratio_err=0.02,
+        min_pairs_for_metrics=4, pair_stability_tol_px=30, matcher=None,
+    )
+    m = a.analyze(img, img_r, mode="chessboard", pair_count=8)
+    assert 6.0 < m.vert_dy_px < 10.0
+    assert m.align_ok is False  # 8 px > 5 px threshold
+
+
+def test_analyzer_returns_empty_metrics_when_no_grid(tmp_path):
+    blank = np.full((480, 640, 3), 200, dtype=np.uint8)
+    a = SmartOverlapAnalyzer(
+        max_vert_dy_px=5.0, max_rotation_deg=0.5, max_zoom_ratio_err=0.02,
+        min_pairs_for_metrics=4, pair_stability_tol_px=30, matcher=None,
+    )
+    m = a.analyze(blank, blank.copy(), mode="chessboard", pair_count=8)
+    assert m.pairs == []
+    assert m.n_inliers == 0
+    assert m.align_ok is False
+    assert m.zoom_ok is False
+
+
+def test_analyzer_live_mode_runs_with_matcher():
+    img_l, img_r = _bgr_feature_pair(shift_y=2)
+    matcher = StereoFeatureMatcher(max_features=500, match_ratio=0.75,
+                                   ransac_thresh=2.0, frame_w=640, frame_h=480)
+    a = SmartOverlapAnalyzer(
+        max_vert_dy_px=5.0, max_rotation_deg=0.5, max_zoom_ratio_err=0.02,
+        min_pairs_for_metrics=4, pair_stability_tol_px=30, matcher=matcher,
+    )
+    m = a.analyze(img_l, img_r, mode="live", pair_count=6)
+    assert m.mode == "live"
+    assert m.n_inliers >= 1
+    assert all(p.color != (255, 255, 255) for p in m.pairs)
