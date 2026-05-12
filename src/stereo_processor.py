@@ -197,6 +197,78 @@ class StereoProcessor:
         eye_r = self.process_eye(frame_r, "right", dst=self._eye_r)
         return eye_l, eye_r, self._sbs
 
+    def process_pair_gpu(
+        self,
+        gpu_l: "cv2.cuda_GpuMat",
+        gpu_r: "cv2.cuda_GpuMat",
+        gpu_sbs: "cv2.cuda_GpuMat",
+    ) -> None:
+        """GPU equivalent of `process_pair`.
+
+        Crops each eye per current zoom/convergence/joint-center, resizes the
+        crop with bilinear interpolation, and writes into the left and right
+        halves of `gpu_sbs` (a pre-allocated 8UC3 GpuMat sized eye_h x eye_w*2).
+        Letterbox regions are cleared to black before each eye write.
+
+        Mirrors the CPU `process_eye` + `_resize_to_eye` 'fit' path used in
+        normal live viewing. The full-FOV / sbs-anamorphic / centered modes
+        used in calibration views are intentionally not ported; they run at
+        low cadence on the CPU and are not part of the latency-critical path.
+        """
+        size = gpu_l.size()  # (width, height)
+        w, h = size[0], size[1]
+        roi_w = int(w / self.zoom)
+        roi_h = int(h / self.zoom)
+        roi_w, roi_h = self._adjust_roi_aspect(roi_w, roi_h)
+
+        cx = int(w * (self.joint_zoom_center / 100.0))
+        cy = int(h * (self.joint_zoom_center_y / 100.0))
+        offset = int(round(self.effective_offset))
+
+        for side, gpu_in, dst_x in (
+            ("left", gpu_l, 0),
+            ("right", gpu_r, self.eye_w),
+        ):
+            cx_eye = cx + offset if side == "left" else cx - offset
+            x1 = max(cx_eye - roi_w // 2, 0)
+            y1 = max(cy - roi_h // 2, 0)
+            x2 = min(x1 + roi_w, w)
+            y2 = min(y1 + roi_h, h)
+            x1 = max(x2 - roi_w, 0)
+            y1 = max(y2 - roi_h, 0)
+            crop_w = x2 - x1
+            crop_h = y2 - y1
+
+            crop = cv2.cuda_GpuMat(gpu_in, (x1, y1, crop_w, crop_h))
+
+            scale = min(self.eye_w / max(1, crop_w), self.eye_h / max(1, crop_h))
+            fit_w = max(1, min(self.eye_w, int(round(crop_w * scale))))
+            fit_h = max(1, min(self.eye_h, int(round(crop_h * scale))))
+            x0 = (self.eye_w - fit_w) // 2
+            y0 = (self.eye_h - fit_h) // 2
+
+            dst_half = cv2.cuda_GpuMat(gpu_sbs, (dst_x, 0, self.eye_w, self.eye_h))
+            dst_half.setTo((0, 0, 0))
+
+            target_roi = cv2.cuda_GpuMat(
+                gpu_sbs, (dst_x + x0, y0, fit_w, fit_h)
+            )
+            scale_x = crop_w / max(1, fit_w)
+            scale_y = crop_h / max(1, fit_h)
+            resize_map = np.float32([
+                [scale_x, 0.0, scale_x * 0.5 - 0.5],
+                [0.0, scale_y, scale_y * 0.5 - 0.5],
+            ])
+            cv2.cuda.warpAffine(
+                crop,
+                resize_map,
+                (fit_w, fit_h),
+                target_roi,
+                cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP,
+                cv2.BORDER_REPLICATE,
+                (0, 0, 0),
+            )
+
     def process_pair_full_fov(self, frame_l: np.ndarray, frame_r: np.ndarray) -> np.ndarray:
         """Compose a full-FOV SBS frame for calibration views.
 
