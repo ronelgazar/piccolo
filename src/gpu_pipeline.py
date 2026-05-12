@@ -63,14 +63,29 @@ class GpuPipeline:
         self._gpu_warp_r = None
         self._gpu_sbs = None
         self._frame_shape: tuple[int, int] | None = None
+        self.last_timings_ms: dict[str, float] = {}
 
     def process(self, frame_l: np.ndarray, frame_r: np.ndarray) -> np.ndarray:
-        """Run the GPU-resident pipeline; return the composed SBS ndarray."""
+        """Run the GPU-resident pipeline; return the composed SBS ndarray.
+
+        Per-stage GPU timings are written to ``self.last_timings_ms``.
+        """
         h, w = frame_l.shape[:2]
         self._ensure_buffers(h, w)
 
+        ev = {
+            "start": cv2.cuda_Event(),
+            "after_upload": cv2.cuda_Event(),
+            "after_warp": cv2.cuda_Event(),
+            "after_fill": cv2.cuda_Event(),
+            "after_process": cv2.cuda_Event(),
+            "after_nudge": cv2.cuda_Event(),
+        }
+        ev["start"].record()
+
         self._gpu_in_l.upload(frame_l)
         self._gpu_in_r.upload(frame_r)
+        ev["after_upload"].record()
 
         used_warp = self.aligner.warp_pair_gpu(
             self._gpu_in_l,
@@ -82,9 +97,13 @@ class GpuPipeline:
             src_l, src_r = self._gpu_warp_l, self._gpu_warp_r
         else:
             src_l, src_r = self._gpu_in_l, self._gpu_in_r
+        ev["after_warp"].record()
 
         fill_holes_cross_gpu(src_l, src_r)
+        ev["after_fill"].record()
+
         self.processor.process_pair_gpu(src_l, src_r, self._gpu_sbs)
+        ev["after_process"].record()
 
         eye_l_gpu = cv2.cuda_GpuMat(
             self._gpu_sbs, (0, 0, self.processor.eye_w, self.processor.eye_h)
@@ -94,6 +113,16 @@ class GpuPipeline:
             (self.processor.eye_w, 0, self.processor.eye_w, self.processor.eye_h),
         )
         self.calibration.apply_nudge_gpu(eye_l_gpu, eye_r_gpu)
+        ev["after_nudge"].record()
+        ev["after_nudge"].waitForCompletion()
+
+        self.last_timings_ms = {
+            "upload_ms": cv2.cuda_Event.elapsedTime(ev["start"], ev["after_upload"]),
+            "warp_ms": cv2.cuda_Event.elapsedTime(ev["after_upload"], ev["after_warp"]),
+            "fill_ms": cv2.cuda_Event.elapsedTime(ev["after_warp"], ev["after_fill"]),
+            "process_ms": cv2.cuda_Event.elapsedTime(ev["after_fill"], ev["after_process"]),
+            "nudge_ms": cv2.cuda_Event.elapsedTime(ev["after_process"], ev["after_nudge"]),
+        }
 
         return self._gpu_sbs.download()
 

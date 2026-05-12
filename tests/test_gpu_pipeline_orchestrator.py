@@ -131,3 +131,21 @@ def test_pipeline_worker_does_not_gate_processing_on_emit_interval():
 
     worker._last_emit_t = time.perf_counter()
     assert worker._can_process_now(time.perf_counter()) is True
+
+
+def test_gpu_pipeline_returns_per_stage_timings():
+    skip_if_no_cuda()
+    from src.gpu_pipeline import GpuPipeline
+
+    aligner, processor, calibration = _build_components()
+    pipeline = GpuPipeline(aligner, processor, calibration)
+    frame_l = _smooth_gradient(60, 80, seed=32)
+    frame_r = _smooth_gradient(60, 80, seed=34)
+    pipeline.process(frame_l, frame_r)
+
+    timings = pipeline.last_timings_ms
+    assert "warp_ms" in timings
+    assert "fill_ms" in timings
+    assert "process_ms" in timings
+    assert "nudge_ms" in timings
+    assert all(v >= 0.0 for v in timings.values())

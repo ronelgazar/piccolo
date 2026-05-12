@@ -213,9 +213,14 @@ class PipelineWorker(QThread):
             ):
                 self.aligner.update(frame_l, frame_r)
             sbs = self._gpu_pipeline.process(frame_l, frame_r)
-            perf['align_warp_ms'] = (time.perf_counter() - t_warp) * 1000.0
-            perf['fill_ms'] = 0.0
-            perf['process_nudge_ms'] = 0.0
+            timings = self._gpu_pipeline.last_timings_ms
+            perf['gpu_pipeline_host_ms'] = (time.perf_counter() - t_warp) * 1000.0
+            perf['gpu_upload_ms'] = timings.get('upload_ms', 0.0)
+            perf['align_warp_ms'] = timings.get('warp_ms', 0.0)
+            perf['fill_ms'] = timings.get('fill_ms', 0.0)
+            perf['process_nudge_ms'] = (
+                timings.get('process_ms', 0.0) + timings.get('nudge_ms', 0.0)
+            )
             self._last_depth_mm, perf['depth_ms'] = self._maybe_update_depth(
                 frame_l, frame_r, low_latency
             )
