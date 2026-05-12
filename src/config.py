@@ -27,6 +27,7 @@ class CameraDeviceCfg:
     height: int = 480
     flip_180: bool = False  # rotate feed 180° (correct upside-down mounting)
     fps: int = 60            # requested camera framerate; driver may negotiate lower
+    decode_backend: str = "opencv"  # "opencv" | "turbojpeg"
 
 
 @dataclass

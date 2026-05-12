@@ -197,3 +197,19 @@ def test_performance_latency_watermark_default():
     from src.config import PerformanceCfg
 
     assert PerformanceCfg().latency_watermark is False
+
+
+def test_camera_decode_backend_default():
+    from src.config import CameraDeviceCfg
+
+    assert CameraDeviceCfg().decode_backend == "opencv"
+
+
+def test_camera_decode_backend_loads_from_yaml(tmp_path):
+    import yaml
+    from src.config import load_config
+
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump({"cameras": {"left": {"decode_backend": "turbojpeg"}}}))
+    cfg = load_config(str(path))
+    assert cfg.cameras.left.decode_backend == "turbojpeg"
