@@ -153,6 +153,16 @@ API probe on the current OpenCV CUDA build:
 
 This means the OpenCV Python surface is not the first blocker. The hard blocker is still acquiring raw MJPEG packets from the UVC camera before OpenCV/DirectShow decodes them. Without a DirectShow or Media Foundation sample-grabber layer, Phase 5 cannot remove the CPU decode/upload step.
 
+### TurboJPEG camera decode probe
+
+After installing the native TurboJPEG library, `turbojpeg.TurboJPEG()` initializes successfully in the project venv. With `cameras.<eye>.decode_backend: turbojpeg`, a camera-only smoke test opened both ELP cameras at 640×480 and reported:
+
+- `tj_ready=True` for both cameras.
+- `raw_mode_ok=True` after setting `cv2.CAP_PROP_FORMAT = -1`.
+- Frames decoded to BGR arrays with shape `(480, 640, 3)`.
+
+That confirms the Phase 3 TurboJPEG fast path is active on this machine, not just falling back to OpenCV decode.
+
 ## Data flow & invariants
 
 ### GpuMat lifetime

@@ -11,14 +11,14 @@ cameras:
     width: 640
     height: 480
     fps: 60
-    decode_backend: opencv
+    decode_backend: turbojpeg
     flip_180: true
   right:
     index: 1
     width: 640
     height: 480
     fps: 60
-    decode_backend: opencv
+    decode_backend: turbojpeg
     flip_180: true
   test_mode: false
 stereo:
