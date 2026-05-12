@@ -13,6 +13,9 @@ from dataclasses import dataclass, field
 from typing import List, Tuple
 
 
+CONFIG_FILE_NAME = "config.yaml"
+
+
 # ---------------------------------------------------------------------------
 # Data-classes that mirror config.yaml
 # ---------------------------------------------------------------------------
@@ -20,8 +23,8 @@ from typing import List, Tuple
 @dataclass
 class CameraDeviceCfg:
     index: int = 0
-    width: int = 1920
-    height: int = 1080
+    width: int = 640
+    height: int = 480
     flip_180: bool = False  # rotate feed 180° (correct upside-down mounting)
 
 
@@ -68,7 +71,7 @@ class StereoCfg:
     zoom: ZoomCfg = field(default_factory=ZoomCfg)
     convergence: ConvergenceCfg = field(default_factory=ConvergenceCfg)
     alignment: AlignmentCfg = field(default_factory=AlignmentCfg)
-    aspect_mode: str = "full"  # "full" keeps camera FOV; "crop" preserves square geometry in each SBS eye
+    aspect_mode: str = "fit"  # "fit" keeps full FOV and square geometry using black bars
 
 
 @dataclass
@@ -94,6 +97,10 @@ class CalibrationStateCfg:
     scale_right_pct: int = 100
     smart_overlap_mode: str = "chessboard"
     smart_overlap_pair_count: int = 8
+    # Persisted manual/applyable alignment (dy in px, dtheta in degrees)
+    alignment_dy: float = 0.0
+    alignment_dtheta_deg: float = 0.0
+    alignment_locked: bool = False
 
 
 @dataclass
@@ -147,7 +154,7 @@ class PerformanceCfg:
 @dataclass
 class SmartOverlapCfg:
     default_mode: str = "chessboard"        # "chessboard" | "live"
-    pair_count: int = 8                     # default; user-adjustable in spinbox (4-20)
+    pair_count: int = 8
     min_pairs_for_metrics: int = 4
     max_vert_dy_px: float = 5.0
     max_rotation_deg: float = 0.5
@@ -157,16 +164,32 @@ class SmartOverlapCfg:
 
 
 @dataclass
+class StereoCalibrationCfg:
+    """Camera stereo calibration values used to convert disparity->depth."""
+    focal_length_mm: float = 10.0    # lens focal length setting in mm (variable-focus lens)
+    sensor_width_mm: float = 5.37    # 1/2.7" sensor width approximation
+    sensor_height_mm: float = 4.04   # 1/2.7" sensor height approximation
+    focal_length_px: float = 0.0     # 0 means derive from focal_length_mm + sensor_width_mm
+    baseline_mm: float = 60.0        # baseline in millimetres
+    depth_ruler_near_mm: float = 60.0
+    depth_ruler_far_mm: float = 600.0
+    depth_downscale: float = 0.5
+    num_disparities: int = 96
+    block_size: int = 15
+
+
+@dataclass
 class PiccoloCfg:
     display: DisplayCfg = field(default_factory=DisplayCfg)
     cameras: CamerasCfg = field(default_factory=CamerasCfg)
     stereo: StereoCfg = field(default_factory=StereoCfg)
     calibration: CalibrationCfg = field(default_factory=CalibrationCfg)
+    stereo_calibration: StereoCalibrationCfg = field(default_factory=StereoCalibrationCfg)
     calibration_state: CalibrationStateCfg = field(default_factory=CalibrationStateCfg)
     controls: ControlsCfg = field(default_factory=ControlsCfg)
     stream: StreamCfg = field(default_factory=StreamCfg)
-    performance: PerformanceCfg = field(default_factory=PerformanceCfg)
     smart_overlap: SmartOverlapCfg = field(default_factory=SmartOverlapCfg)
+    performance: PerformanceCfg = field(default_factory=PerformanceCfg)
 
 
 # ---------------------------------------------------------------------------
@@ -193,8 +216,8 @@ def _merge(dataclass_obj, raw_dict: dict | None):
 def default_config_path() -> str:
     """Return the editable config path for source or packaged execution."""
     if getattr(sys, "frozen", False):
-        return os.path.join(os.path.dirname(sys.executable), "config.yaml")
-    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.yaml")
+        return os.path.join(os.path.dirname(sys.executable), CONFIG_FILE_NAME)
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), CONFIG_FILE_NAME)
 
 
 def bundled_config_path() -> str | None:
@@ -202,7 +225,7 @@ def bundled_config_path() -> str | None:
     bundle_root = getattr(sys, "_MEIPASS", None)
     if not bundle_root:
         return None
-    return os.path.join(bundle_root, "config.yaml")
+    return os.path.join(bundle_root, CONFIG_FILE_NAME)
 
 
 def load_config(path: str | None = None) -> PiccoloCfg:

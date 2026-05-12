@@ -4,12 +4,13 @@ from __future__ import annotations
 import time
 
 import cv2
+import math
 import numpy as np
 from PyQt6.QtCore import Qt, QTimer, pyqtSlot, pyqtSignal
 from PyQt6.QtGui import QKeyEvent, QShortcut, QKeySequence
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, QPushButton, QGroupBox,
-    QComboBox, QSpinBox,
+    QComboBox, QSpinBox, QScrollArea,
 )
 
 from ..config_state import save_calibration_state
@@ -52,6 +53,7 @@ class CalibrationTab(QWidget):
         self.smart_overlap_worker.result_ready.connect(self._on_smart_overlap_result)
         self.smart_overlap_worker.start()
         self._smart_active = False
+        self._smart_frozen = False
         self._smart_mode = (state.smart_overlap_mode if state else "chessboard")
         self._smart_pair_count = (state.smart_overlap_pair_count if state else 8)
         self._latest_metrics: OverlapMetrics | None = None
@@ -68,10 +70,19 @@ class CalibrationTab(QWidget):
         self._init_overlay_shortcuts()
 
         root = QVBoxLayout(self)
-        root.addWidget(self._make_nudge_group())
-        root.addWidget(self._make_reset_row())
-        root.addWidget(self._make_overlay_cal_group())
-        root.addWidget(self._make_smart_overlap_group(), stretch=1)
+        # Put the calibration content inside a scroll area so the tab is
+        # usable on smaller displays where the controls exceed available height.
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.addWidget(self._make_nudge_group())
+        content_layout.addWidget(self._make_reset_row())
+        content_layout.addWidget(self._make_overlay_cal_group())
+        content_layout.addWidget(self._make_smart_overlap_group(), stretch=1)
+        content_layout.addStretch(0)
+        scroll.setWidget(content)
+        root.addWidget(scroll)
 
         self._last_wizard_render_t: float = 0.0
         if worker is not None:
@@ -115,6 +126,16 @@ class CalibrationTab(QWidget):
         btn = QPushButton("Reset all nudges")
         btn.clicked.connect(self._reset)
         lay.addWidget(btn)
+        btn_align_reset = QPushButton("Reset alignment")
+        btn_align_reset.clicked.connect(self._reset_alignment)
+        lay.addWidget(btn_align_reset)
+        lay.addStretch(1)
+        return w
+
+    def _make_physical_apply_row(self) -> QWidget:
+        w = QWidget(self)
+        lay = QHBoxLayout(w)
+        # placeholder if needed in future
         lay.addStretch(1)
         return w
 
@@ -153,6 +174,19 @@ class CalibrationTab(QWidget):
         st.nudge_left_x = st.nudge_right_x = st.nudge_left_y = st.nudge_right_y = 0
         st.scale_left_pct = st.scale_right_pct = 100
         save_calibration_state(self.worker.cfg)
+
+    def _reset_alignment(self) -> None:
+        if self.worker is None:
+            return
+        st = self.worker.cfg.calibration_state
+        st.alignment_dy = 0.0
+        st.alignment_dtheta_deg = 0.0
+        st.alignment_locked = False
+        save_calibration_state(self.worker.cfg)
+        aligner = getattr(self.worker, "aligner", None)
+        if aligner is not None:
+            aligner.reset()
+        self.overlay_hint_lbl.setText("Reset shift+rotate alignment")
 
     # ------------------ Overlay/manual calibration --------------------
 
@@ -217,7 +251,7 @@ class CalibrationTab(QWidget):
         if self._smart_active:
             self._stop_smart_mode()
         self._overlay_active = True
-        self.worker.raw_frame_mode = "full_fov"
+        self.worker.raw_frame_mode = "full_fov_centered"
         self._update_worker_raw_rate()
         self._overlay_flash_on = True
         self._overlay_last_sbs = None
@@ -478,10 +512,25 @@ class CalibrationTab(QWidget):
         self.btn_smart_start.clicked.connect(self._toggle_smart_mode)
         controls.addWidget(self.btn_smart_start)
 
+        self.btn_smart_freeze = QPushButton("Freeze lines")
+        self.btn_smart_freeze.setEnabled(False)
+        self.btn_smart_freeze.clicked.connect(self._toggle_smart_freeze)
+        controls.addWidget(self.btn_smart_freeze)
+
         self.btn_apply_scale = QPushButton("Apply detected scale")
         self.btn_apply_scale.setEnabled(False)
         self.btn_apply_scale.clicked.connect(self._apply_detected_scale)
         controls.addWidget(self.btn_apply_scale)
+        
+        self.btn_apply_vert = QPushButton("Apply detected vert offset")
+        self.btn_apply_vert.setEnabled(False)
+        self.btn_apply_vert.clicked.connect(self._apply_detected_vert)
+        controls.addWidget(self.btn_apply_vert)
+
+        self.btn_apply_shift_rotate = QPushButton("Apply shift+rotate")
+        self.btn_apply_shift_rotate.setEnabled(False)
+        self.btn_apply_shift_rotate.clicked.connect(self._apply_shift_and_rotate)
+        controls.addWidget(self.btn_apply_shift_rotate)
 
         lay.addLayout(controls)
         return box
@@ -499,7 +548,8 @@ class CalibrationTab(QWidget):
             self._overlay_last_sbs = sbs.copy()
             self._render_overlay_preview(self._overlay_last_sbs)
             return
-        if not self._smart_active:
+
+        if not self._smart_active or self._smart_frozen:
             return
         if sbs is None or sbs.ndim != 3 or sbs.shape[2] != 3:
             return
@@ -512,6 +562,8 @@ class CalibrationTab(QWidget):
         if self._smart_active:
             self.smart_overlap_metrics_ready.emit(result.metrics)
         self._update_smart_readouts(result.metrics)
+        if self._smart_frozen:
+            self._update_smart_freeze_ui()
 
     def _update_smart_readouts(self, m: OverlapMetrics) -> None:
         min_pairs = self.worker.cfg.smart_overlap.min_pairs_for_metrics if self.worker else 4
@@ -523,19 +575,25 @@ class CalibrationTab(QWidget):
         else:
             self.lbl_vert.setText(f"Vert offset: {m.vert_dy_px:+.1f} px")
             self.lbl_rot.setText(f"Rotation: {m.rotation_deg:+.2f} deg")
-            zr = "--" if m.zoom_ratio is None else f"{m.zoom_ratio:.3f}"
+            zr = "--" if m.zoom_ratio is None or m.zoom_ratio <= 0 else f"{m.zoom_ratio:.3f}"
             self.lbl_zoom.setText(f"Zoom ratio: {zr}")
             self.lbl_zoom_eye.setText(self._zoom_eye_text(m.zoom_ratio))
         self.lbl_pairs.setText(f"Match pairs: {m.n_inliers} / {m.n_requested}")
 
         self._set_badge(self.lbl_align_badge, "ALIGN", m.align_ok, neutral=m.n_inliers == 0)
-        self._set_badge(self.lbl_zoom_badge, "ZOOM", m.zoom_ok, neutral=m.zoom_ratio is None)
+        self._set_badge(self.lbl_zoom_badge, "ZOOM", m.zoom_ok, neutral=m.zoom_ratio is None or m.zoom_ratio <= 0)
         self.btn_apply_scale.setEnabled(
-            self._smart_active and m.zoom_ratio is not None and m.n_inliers >= min_pairs
+            self._smart_active and m.zoom_ratio is not None and m.zoom_ratio > 0 and m.n_inliers >= min_pairs
         )
+        # Enable vertical-apply when we have enough inliers for alignment
+        if hasattr(self, 'btn_apply_vert'):
+            enabled = self._smart_active and m.n_inliers >= min_pairs
+            self.btn_apply_vert.setEnabled(enabled)
+        if hasattr(self, 'btn_apply_shift_rotate'):
+            self.btn_apply_shift_rotate.setEnabled(self._smart_active and m.n_inliers >= min_pairs)
 
     def _zoom_eye_text(self, zoom_ratio: float | None) -> str:
-        if zoom_ratio is None:
+        if zoom_ratio is None or zoom_ratio <= 0:
             return "Bigger eye: --"
         tol = self.worker.cfg.smart_overlap.max_zoom_ratio_err if self.worker else 0.02
         if abs(zoom_ratio - 1.0) <= tol:
@@ -572,6 +630,20 @@ class CalibrationTab(QWidget):
         else:
             self._start_smart_mode()
 
+    def _toggle_smart_freeze(self) -> None:
+        if not self._smart_active:
+            return
+        self._smart_frozen = not self._smart_frozen
+        self._update_smart_freeze_ui()
+
+    def _update_smart_freeze_ui(self) -> None:
+        if hasattr(self, "btn_smart_freeze"):
+            self.btn_smart_freeze.setText("Unfreeze lines" if self._smart_frozen else "Freeze lines")
+        if self._smart_frozen:
+            self.overlay_hint_lbl.setText("Smart overlap lines frozen")
+        elif self._smart_active:
+            self.overlay_hint_lbl.setText("Smart overlap live")
+
     def _start_smart_mode(self) -> None:
         if self._overlay_active:
             self._cancel_overlay_mode()
@@ -579,6 +651,9 @@ class CalibrationTab(QWidget):
         if self.worker is not None:
             self.worker.raw_frame_mode = "processed"
         self.btn_smart_start.setText("Stop")
+        self.btn_smart_freeze.setEnabled(True)
+        self._smart_frozen = False
+        self._update_smart_freeze_ui()
         self.smart_overlap_mode_changed.emit(True)
         self._update_worker_raw_rate()
 
@@ -587,6 +662,9 @@ class CalibrationTab(QWidget):
             return
         self._smart_active = False
         self.btn_smart_start.setText("Start")
+        self._smart_frozen = False
+        self.btn_smart_freeze.setEnabled(False)
+        self._update_smart_freeze_ui()
         self.smart_overlap_worker.reset_state()
         self.btn_apply_scale.setEnabled(False)
         if self.worker is not None:
@@ -620,7 +698,7 @@ class CalibrationTab(QWidget):
 
     def _apply_detected_scale(self) -> None:
         metrics = self._latest_metrics
-        if self.worker is None or metrics is None or metrics.zoom_ratio is None:
+        if self.worker is None or metrics is None or metrics.zoom_ratio is None or metrics.zoom_ratio <= 0:
             return
         right_scale = int(round(100.0 / metrics.zoom_ratio))
         right_scale = max(80, min(120, right_scale))
@@ -628,3 +706,63 @@ class CalibrationTab(QWidget):
         self.sld_rscale.setValue(right_scale)
         self._on_lscale(100)
         self._on_rscale(right_scale)
+
+    def _apply_detected_vert(self) -> None:
+        """Apply the smart-overlap detected vertical offset to runtime calibration."""
+        metrics = self._latest_metrics
+        if self.worker is None or metrics is None:
+            return
+        min_pairs = self.worker.cfg.smart_overlap.min_pairs_for_metrics
+        if metrics.n_inliers < min_pairs:
+            return
+        # metrics.vert_dy_px is right_y - left_y at frame center; to align,
+        # shift the right eye by -vert_dy_px (so right + nudge_right_y == left)
+        dy = float(metrics.vert_dy_px)
+        nudge_right_y = int(round(-dy))
+        # Apply to config state and runtime calibration
+        st = self.worker.cfg.calibration_state
+        st.nudge_left_y = 0
+        st.nudge_right_y = nudge_right_y
+        save_calibration_state(self.worker.cfg)
+        self.worker.calibration.nudge_left_y = st.nudge_left_y
+        self.worker.calibration.nudge_right_y = st.nudge_right_y
+        # Update sliders if present
+        if self.sld_ly is not None:
+            self.sld_ly.setValue(st.nudge_left_y)
+        if self.sld_ry is not None:
+            self.sld_ry.setValue(st.nudge_right_y)
+        self.overlay_hint_lbl.setText(f"Applied vert offset: {dy:+.1f}px → nudge_right_y={nudge_right_y}")
+
+    def _apply_shift_and_rotate(self) -> None:
+        """Apply detected vertical shift and rotation to the running aligner."""
+        metrics = self._latest_metrics
+        if self.worker is None or metrics is None:
+            return
+        min_pairs = self.worker.cfg.smart_overlap.min_pairs_for_metrics
+        if metrics.n_inliers < min_pairs:
+            return
+        dy = float(metrics.vert_dy_px)
+        theta_rad = math.radians(float(metrics.rotation_deg))
+        # Aligner's result is 'right relative to left'. We set the smoothed
+        # parameters directly and rebuild the warp matrices to apply immediately.
+        aligner = getattr(self.worker, 'aligner', None)
+        if aligner is None:
+            return
+        # Apply values (aligner splits correction 50/50 between eyes internally)
+        aligner._smooth_dy = dy
+        aligner._smooth_dtheta = theta_rad
+        try:
+            aligner._build_warp_matrices()
+        except Exception:
+            # Fall back to calling update path if direct rebuild fails
+            aligner.force_update()
+        # Persist into calibration_state for next run (store degrees)
+        st = self.worker.cfg.calibration_state
+        st.alignment_dy = float(dy)
+        st.alignment_dtheta_deg = float(metrics.rotation_deg)
+        st.alignment_locked = True
+        save_calibration_state(self.worker.cfg)
+        self.overlay_hint_lbl.setText(f"Applied shift+rotate: dy={dy:+.1f}px theta={metrics.rotation_deg:+.2f}° (saved)")
+
+    def _start_physical_offset(self) -> None:
+        pass

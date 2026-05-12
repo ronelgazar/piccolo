@@ -26,8 +26,8 @@ class CameraCapture:
     def __init__(
         self,
         index: int = 0,
-        width: int = 1920,
-        height: int = 1080,
+        width: int = 640,
+        height: int = 480,
         backend: str = "opencv",
         name: str = "camera",
     ):
@@ -250,7 +250,7 @@ class TestPatternCamera(CameraCapture):
     """Generates a synthetic stereo-friendly test pattern so the display and
     zoom logic can be tested without physical cameras."""
 
-    def __init__(self, width: int = 1920, height: int = 1080, side: str = "left", name: str = "test"):
+    def __init__(self, width: int = 640, height: int = 480, side: str = "left", name: str = "test"):
         super().__init__(index=-1, width=width, height=height, backend="test", name=name)
         self.side = side
         self._base_frame = self._generate_pattern()
@@ -361,7 +361,7 @@ if __name__ == "__main__":
         opened_indices = []
         for idx in indices:
             try:
-                c = CameraCapture(index=idx, width=1920, height=1080, name=f"cam-{idx}")
+                c = CameraCapture(index=idx, width=640, height=480, name=f"cam-{idx}")
                 c.start()
                 caps.append(c)
                 opened_indices.append(idx)

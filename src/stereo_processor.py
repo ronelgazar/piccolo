@@ -173,22 +173,7 @@ class StereoProcessor:
 
         crop = frame[y1:y2, x1:x2]
 
-        # Fast path: if the crop already matches the output size
-        # (common at zoom=1 when camera res == display res), skip resize.
-        ch, cw = crop.shape[:2]
-        if cw == self.eye_w and ch == self.eye_h:
-            if dst is not None:
-                dst[:] = crop
-                return dst
-            return crop.copy()
-
-        # Resize to eye output resolution (into dst if provided)
-        if dst is not None:
-            cv2.resize(crop, (self.eye_w, self.eye_h),
-                       dst=dst, interpolation=cv2.INTER_LINEAR)
-            return dst
-        return cv2.resize(crop, (self.eye_w, self.eye_h),
-                          interpolation=cv2.INTER_LINEAR)
+        return self._resize_to_eye(crop, dst)
 
     def compose_sbs(self, left: np.ndarray, right: np.ndarray) -> np.ndarray:
         """Return a side-by-side frame (width = 2 × eye_w).
@@ -220,11 +205,32 @@ class StereoProcessor:
         camera view so users do not see a cropped slave just because normal
         live viewing is zoomed in.
         """
-        cv2.resize(frame_l, (self.eye_w, self.eye_h), dst=self._full_fov_eye_l,
-                   interpolation=cv2.INTER_LINEAR)
-        cv2.resize(frame_r, (self.eye_w, self.eye_h), dst=self._full_fov_eye_r,
-                   interpolation=cv2.INTER_LINEAR)
+        self._resize_to_eye(frame_l, self._full_fov_eye_l, mode="fit")
+        self._resize_to_eye(frame_r, self._full_fov_eye_r, mode="fit")
         return self._full_fov_sbs
+
+    def process_pair_full_fov_sbs_anamorphic(self, frame_l: np.ndarray, frame_r: np.ndarray) -> np.ndarray:
+        """Compose full-FOV SBS pre-compensated for Goovis side-by-side stretch.
+
+        Goovis/SBS playback stretches each half-frame horizontally into a full
+        eye. To keep a 4:3 camera image square after that hardware stretch, the
+        source half must be horizontally compressed before it is sent.
+        """
+        self._resize_to_eye(frame_l, self._full_fov_eye_l, mode="sbs_fit")
+        self._resize_to_eye(frame_r, self._full_fov_eye_r, mode="sbs_fit")
+        return self._full_fov_sbs
+    def process_pair_full_fov_centered(self, frame_l: np.ndarray, frame_r: np.ndarray) -> np.ndarray:
+        """Compose full-FOV SBS with each camera image centered unscaled.
+
+        This is intended for manual Goovis calibration. It avoids resampling
+        blur and aspect surprises by placing the camera frame at native pixel
+        size when it fits inside the SBS half. Larger frames are fit down with
+        aspect preserved.
+        """
+        self._center_to_eye(frame_l, self._full_fov_eye_l)
+        self._center_to_eye(frame_r, self._full_fov_eye_r)
+        return self._full_fov_sbs
+
 
     def process_pair_joint_zoom(self, frame_l: np.ndarray, frame_r: np.ndarray):
         """Process both eyes using a joint zoom center (horizontal and vertical percent)."""
@@ -244,14 +250,12 @@ class StereoProcessor:
         y1 = max(y2 - roi_h, 0)
         crop_l = frame_l[y1:y2, x1:x2]
         crop_r = frame_r[y1:y2, x1:x2]
-        eye_l = cv2.resize(crop_l, (self.eye_w, self.eye_h), interpolation=cv2.INTER_LINEAR)
-        eye_r = cv2.resize(crop_r, (self.eye_w, self.eye_h), interpolation=cv2.INTER_LINEAR)
-        self._eye_l[:] = eye_l
-        self._eye_r[:] = eye_r
+        self._resize_to_eye(crop_l, self._eye_l)
+        self._resize_to_eye(crop_r, self._eye_r)
         return self._eye_l, self._eye_r, self._sbs
 
     def _adjust_roi_aspect(self, roi_w: int, roi_h: int) -> tuple[int, int]:
-        if getattr(self.cfg, "aspect_mode", "full") != "crop":
+        if getattr(self.cfg, "aspect_mode", "fit") != "crop":
             return roi_w, roi_h
         out_aspect = self.eye_w / self.eye_h
         roi_aspect = roi_w / roi_h
@@ -260,6 +264,66 @@ class StereoProcessor:
         elif roi_aspect < out_aspect:
             roi_h = max(1, int(round(roi_w / out_aspect)))
         return roi_w, roi_h
+
+    def _center_to_eye(self, img: np.ndarray, dst: np.ndarray | None = None) -> np.ndarray:
+        h, w = img.shape[:2]
+        out = dst if dst is not None else np.zeros((self.eye_h, self.eye_w, 3), dtype=img.dtype)
+        out.fill(0)
+        if w <= self.eye_w and h <= self.eye_h:
+            fit_w, fit_h = w, h
+        else:
+            scale = min(self.eye_w / max(1, w), self.eye_h / max(1, h))
+            fit_w = max(1, min(self.eye_w, int(round(w * scale))))
+            fit_h = max(1, min(self.eye_h, int(round(h * scale))))
+        x0 = (self.eye_w - fit_w) // 2
+        y0 = (self.eye_h - fit_h) // 2
+        roi = out[y0:y0 + fit_h, x0:x0 + fit_w]
+        if fit_w == w and fit_h == h:
+            roi[:] = img
+        else:
+            cv2.resize(img, (fit_w, fit_h), dst=roi, interpolation=cv2.INTER_AREA)
+        return out
+    def _resize_to_eye(self, img: np.ndarray, dst: np.ndarray | None = None, mode: str | None = None) -> np.ndarray:
+        mode = mode or getattr(self.cfg, "aspect_mode", "fit")
+        h, w = img.shape[:2]
+        if mode not in ("fit", "sbs_fit"):
+            if w == self.eye_w and h == self.eye_h:
+                if dst is not None:
+                    dst[:] = img
+                    return dst
+                return img.copy()
+            if dst is not None:
+                cv2.resize(img, (self.eye_w, self.eye_h), dst=dst, interpolation=cv2.INTER_LINEAR)
+                return dst
+            return cv2.resize(img, (self.eye_w, self.eye_h), interpolation=cv2.INTER_LINEAR)
+
+        if mode == "sbs_fit":
+            display_eye_w = self.eye_w * 2
+            display_eye_h = self.eye_h
+            img_aspect = w / max(1, h)
+            display_aspect = display_eye_w / max(1, display_eye_h)
+            if display_aspect > img_aspect:
+                display_fit_h = display_eye_h
+                display_fit_w = int(round(display_fit_h * img_aspect))
+            else:
+                display_fit_w = display_eye_w
+                display_fit_h = int(round(display_fit_w / img_aspect))
+            fit_w = max(1, min(self.eye_w, int(round(display_fit_w / 2.0))))
+            fit_h = max(1, min(self.eye_h, display_fit_h))
+        else:
+            scale = min(self.eye_w / max(1, w), self.eye_h / max(1, h))
+            fit_w = max(1, min(self.eye_w, int(round(w * scale))))
+            fit_h = max(1, min(self.eye_h, int(round(h * scale))))
+        out = dst if dst is not None else np.zeros((self.eye_h, self.eye_w, 3), dtype=img.dtype)
+        out.fill(0)
+        x0 = (self.eye_w - fit_w) // 2
+        y0 = (self.eye_h - fit_h) // 2
+        roi = out[y0:y0 + fit_h, x0:x0 + fit_w]
+        if fit_w == w and fit_h == h:
+            roi[:] = img
+        else:
+            cv2.resize(img, (fit_w, fit_h), dst=roi, interpolation=cv2.INTER_LINEAR)
+        return out
 
     def smooth_zoom_transition(self, target_zoom: float, steps: int = 10):
         """Smoothly transition to the target zoom level in defined steps."""

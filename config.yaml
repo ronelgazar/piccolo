@@ -8,13 +8,13 @@ cameras:
   backend: opencv
   left:
     index: 2
-    width: 1920
-    height: 1080
+    width: 640
+    height: 480
     flip_180: true
   right:
     index: 1
-    width: 1920
-    height: 1080
+    width: 640
+    height: 480
     flip_180: true
   test_mode: false
 stereo:
@@ -51,16 +51,34 @@ calibration:
   blink_cycles: 3
 calibration_state:
   nudge_left_x: 0
-  nudge_right_x: 0
+  nudge_right_x: -34
   nudge_left_y: 0
-  nudge_right_y: 0
+  nudge_right_y: -72
   convergence_offset: 0
   joint_zoom_center: 50
   joint_zoom_center_y: 50
   scale_left_pct: 100
   scale_right_pct: 100
-  smart_overlap_mode: chessboard
+  smart_overlap_mode: live
   smart_overlap_pair_count: 8
+  alignment_dy: 0.0
+  alignment_dtheta_deg: 0.0
+  alignment_locked: false
+stereo_calibration:
+  focal_length_mm: 10.0
+  sensor_width_mm: 5.37
+  sensor_height_mm: 4.04
+  focal_length_px: 1000.0
+  baseline_mm: 60.0
+  depth_ruler_near_mm: 60.0
+  depth_ruler_far_mm: 600.0
+  depth_downscale: 0.5
+  num_disparities: 96
+  block_size: 15
+performance:
+  low_latency_mode: false
+  use_gpu_for_depth: true
+  use_gpu_pipeline: true
 controls:
   zoom_in:
   - EQUALS
@@ -84,16 +102,3 @@ controls:
   pedal_mode_b: side
   pedal_mode_c: updown
   pedal_repeat_ms: 100
-performance:
-  low_latency_mode: false
-  use_gpu_for_depth: true
-  use_gpu_pipeline: true
-smart_overlap:
-  default_mode: chessboard
-  pair_count: 8
-  min_pairs_for_metrics: 4
-  max_vert_dy_px: 5.0
-  max_rotation_deg: 0.5
-  max_zoom_ratio_err: 0.02
-  pair_stability_tol_px: 30.0
-  worker_interval_sec: 0.2

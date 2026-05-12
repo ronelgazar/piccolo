@@ -107,6 +107,80 @@ def test_process_eye_full_aspect_keeps_camera_width():
     assert out[:, 0].mean() > 0
 
 
+
+def test_process_eye_fit_preserves_full_4x3_frame_without_stretching():
+    cfg = StereoCfg()
+    cfg.aspect_mode = "fit"
+    p = StereoProcessor(cfg, eye_width=96, eye_height=108)
+    frame = np.zeros((48, 64, 3), dtype=np.uint8)
+
+    # White full-height left edge proves the whole camera width remains visible.
+    frame[:, :4] = 255
+    # A square in the center should remain square after fitting into the tall eye.
+    frame[20:28, 28:36] = 255
+
+    out = p.process_eye(frame, "left")
+
+    assert out[:, 0].mean() > 0
+    assert out[:10].mean() == 0
+    assert out[-10:].mean() == 0
+    mask = out[30:78, :, 0] > 128
+    ys, xs = np.where(mask)
+    center_xs = xs[xs > 30]
+    center_ys = ys[xs > 30]
+    width = center_xs.max() - center_xs.min() + 1
+    height = center_ys.max() - center_ys.min() + 1
+    assert abs(width - height) <= 2
+
+
+def test_full_fov_pair_forces_fit_even_when_live_mode_stretches():
+    cfg = StereoCfg()
+    cfg.aspect_mode = "full"
+    p = StereoProcessor(cfg, eye_width=96, eye_height=108)
+    frame = np.zeros((48, 64, 3), dtype=np.uint8)
+    frame[20:28, 28:36] = 255
+
+    full = p.process_pair_full_fov(frame, frame)[:, :96]
+
+    assert full[:10].mean() == 0
+    assert full[-10:].mean() == 0
+    mask = full[30:78, :, 0] > 128
+    ys, xs = np.where(mask)
+    width = xs.max() - xs.min() + 1
+    height = ys.max() - ys.min() + 1
+    assert abs(width - height) <= 2
+
+
+def test_full_fov_sbs_anamorphic_precompensates_for_goovis_stretch():
+    cfg = StereoCfg()
+    p = StereoProcessor(cfg, eye_width=96, eye_height=108)
+    frame = np.zeros((48, 64, 3), dtype=np.uint8)
+    frame[:, :] = 255
+
+    eye = p.process_pair_full_fov_sbs_anamorphic(frame, frame)[:, :96]
+    mask = eye[:, :, 0] > 128
+    ys, xs = np.where(mask)
+
+    assert xs.min() == 12
+    assert xs.max() == 83
+    assert ys.min() == 0
+    assert ys.max() == 107
+
+
+def test_full_fov_centered_keeps_native_camera_size_when_it_fits():
+    cfg = StereoCfg()
+    p = StereoProcessor(cfg, eye_width=96, eye_height=108)
+    frame = np.full((48, 64, 3), 255, dtype=np.uint8)
+
+    eye = p.process_pair_full_fov_centered(frame, frame)[:, :96]
+    mask = eye[:, :, 0] > 128
+    ys, xs = np.where(mask)
+
+    assert xs.min() == 16
+    assert xs.max() == 79
+    assert ys.min() == 30
+    assert ys.max() == 77
+
 def test_full_fov_pair_ignores_live_zoom_crop():
     cfg = StereoCfg()
     p = StereoProcessor(cfg, eye_width=96, eye_height=108)

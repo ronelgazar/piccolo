@@ -9,6 +9,7 @@ from ..config import PiccoloCfg
 from .live_tab import LiveTab
 from .calibration_tab import CalibrationTab
 from .settings_tab import SettingsTab
+from .recording_tab import RecordingTab
 from .pipeline_worker import PipelineWorker
 from .goovis_window import GoovisWindow
 
@@ -28,8 +29,10 @@ class MainWindow(QMainWindow):
         self.live_tab = LiveTab(self.worker, self)
         self.calibration_tab = CalibrationTab(self.worker, self)
         self.settings_tab = SettingsTab(self.worker, self)
+        self.recording_tab = RecordingTab(self.worker, self)
         self.tabs.addTab(self.live_tab, "Live")
         self.tabs.addTab(self.calibration_tab, "Calibration")
+        self.tabs.addTab(self.recording_tab, "Recording")
         self.tabs.addTab(self.settings_tab, "Settings")
         self.tabs.currentChanged.connect(self._on_tab_changed)
         self.setCentralWidget(self.tabs)
@@ -76,6 +79,7 @@ class MainWindow(QMainWindow):
         if self.goovis is not None:
             self.goovis.close()
         self.calibration_tab.stop_background_work()
+        self.recording_tab.stop_recording()
         if self.worker.isRunning():
             self.worker.stop()
         super().closeEvent(event)

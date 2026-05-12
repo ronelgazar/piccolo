@@ -27,6 +27,8 @@ class SettingsTab(QWidget):
         root.addWidget(self._make_cameras_group())
         root.addWidget(self._make_display_group())
         root.addWidget(self._make_stereo_group())
+        root.addWidget(self._make_depth_group())
+        root.addWidget(self._make_performance_group())
         root.addWidget(self._make_pedals_group())
         root.addWidget(self._make_config_group())
         root.addStretch(1)
@@ -93,9 +95,10 @@ class SettingsTab(QWidget):
         form.addRow(cb)
         # Zoom step
         self.cmb_aspect = QComboBox()
-        self.cmb_aspect.addItem("Full camera width", "full")
+        self.cmb_aspect.addItem("Fit full FOV (no stretch)", "fit")
+        self.cmb_aspect.addItem("Full camera width (stretch)", "full")
         self.cmb_aspect.addItem("Geometry-correct crop", "crop")
-        idx = self.cmb_aspect.findData(getattr(s, "aspect_mode", "full"))
+        idx = self.cmb_aspect.findData(getattr(s, "aspect_mode", "fit"))
         self.cmb_aspect.setCurrentIndex(max(0, idx))
         self.cmb_aspect.currentIndexChanged.connect(
             lambda i: setattr(s, "aspect_mode", self.cmb_aspect.itemData(i)))
@@ -106,6 +109,38 @@ class SettingsTab(QWidget):
         form.addRow(QLabel("Zoom tick (ms)"),
                     self._spinbox(s.zoom.tick_ms, 1, 1000,
                                   lambda v: setattr(s.zoom, "tick_ms", v)))
+        return box
+
+    def _make_performance_group(self) -> QGroupBox:
+        box = QGroupBox("Performance", self)
+        form = QFormLayout(box)
+        perf = self.worker.cfg.performance
+        cb_low = QCheckBox("Low-latency mode")
+        cb_low.setChecked(getattr(perf, 'low_latency_mode', False))
+        cb_low.stateChanged.connect(lambda s: setattr(self.worker.cfg.performance, 'low_latency_mode', s == Qt.CheckState.Checked.value))
+        form.addRow(cb_low)
+
+        cb_gpu = QCheckBox("Use GPU for depth (if available)")
+        cb_gpu.setChecked(getattr(perf, 'use_gpu_for_depth', False))
+        cb_gpu.stateChanged.connect(lambda s: setattr(self.worker.cfg.performance, 'use_gpu_for_depth', s == Qt.CheckState.Checked.value))
+        form.addRow(cb_gpu)
+
+        return box
+
+    def _make_depth_group(self) -> QGroupBox:
+        box = QGroupBox("Depth calibration", self)
+        form = QFormLayout(box)
+        d = self.worker.cfg.stereo_calibration
+        form.addRow(QLabel("Focal length (mm)"), self._doublebox(d.focal_length_mm, 1.0, 50.0, 0.1, lambda v: setattr(d, "focal_length_mm", v)))
+        form.addRow(QLabel("Sensor width (mm)"), self._doublebox(d.sensor_width_mm, 1.0, 20.0, 0.01, lambda v: setattr(d, "sensor_width_mm", v)))
+        form.addRow(QLabel("Sensor height (mm)"), self._doublebox(d.sensor_height_mm, 1.0, 20.0, 0.01, lambda v: setattr(d, "sensor_height_mm", v)))
+        form.addRow(QLabel("Baseline (mm)"), self._doublebox(d.baseline_mm, 1.0, 300.0, 0.1, lambda v: setattr(d, "baseline_mm", v)))
+        form.addRow(QLabel("Derived focal px"), self._doublebox(d.focal_length_px, 0.0, 10000.0, 1.0, lambda v: setattr(d, "focal_length_px", v)))
+        form.addRow(QLabel("Ruler near (mm)"), self._doublebox(d.depth_ruler_near_mm, 1.0, 5000.0, 1.0, lambda v: setattr(d, "depth_ruler_near_mm", v)))
+        form.addRow(QLabel("Ruler far (mm)"), self._doublebox(d.depth_ruler_far_mm, 2.0, 10000.0, 1.0, lambda v: setattr(d, "depth_ruler_far_mm", v)))
+        form.addRow(QLabel("Depth downscale"), self._doublebox(d.depth_downscale, 0.1, 1.0, 0.05, lambda v: setattr(d, "depth_downscale", v)))
+        form.addRow(QLabel("Num disparities"), self._spinbox(d.num_disparities, 16, 256, lambda v: setattr(d, "num_disparities", v)))
+        form.addRow(QLabel("Block size"), self._spinbox(d.block_size, 5, 51, lambda v: setattr(d, "block_size", v | 1)))
         return box
 
     # ------------------ Helpers ----------------------------------------
@@ -239,5 +274,7 @@ class SettingsTab(QWidget):
             },
             "calibration": asdict(cfg.calibration),
             "calibration_state": asdict(cfg.calibration_state),
+            "stereo_calibration": asdict(cfg.stereo_calibration),
+            "performance": asdict(cfg.performance),
             "controls": asdict(cfg.controls),
         }
