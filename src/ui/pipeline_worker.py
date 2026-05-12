@@ -250,6 +250,10 @@ class PipelineWorker(QThread):
         self._maybe_emit_calibration_sbs(calibration_sbs, sbs, now)
         perf['overlay_ms'] = self._maybe_render_overlay(sbs, low_latency)
         t_q = time.perf_counter()
+        if getattr(self.cfg.performance, "latency_watermark", False):
+            from .latency_watermark import draw_timestamp_watermark
+
+            draw_timestamp_watermark(sbs, time.monotonic() * 1000.0)
         self.sbs_qimage_ready.emit(ndarray_to_qimage(sbs))
         perf['qimage_ms'] = (time.perf_counter() - t_q) * 1000.0
         self._finalize_frame(perf, t0, now)

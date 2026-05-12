@@ -175,6 +175,18 @@ Camera frames are uploaded into a pinned (page-locked) host buffer via `cv2.cuda
 
 This means CPU work increases slightly (we now process every camera frame, not every display interval), but glass-to-glass latency drops by up to one display interval (~16 ms at 60 Hz).
 
+## Glass-to-glass measurement
+
+Set `performance.latency_watermark: true` in `config.yaml` and restart the app. The pipeline draws a monotonic-clock timestamp in milliseconds into the top-left corner of every emitted SBS frame.
+
+To estimate glass-to-glass latency, record the headset output with a high-speed camera or phone slow-motion mode while the same recording also captures a visible system clock. For a sampled frame:
+
+1. Read the clock time visible to the recording device.
+2. Read the timestamp watermark visible in the headset image.
+3. Compute `latency_ms = camera_clock_at_shutter_ms - watermark_value_ms`.
+
+Use the same phone, lighting, scene, and resolution for every comparison. The absolute value is approximate, but the delta between configurations is good enough to compare `use_gpu_pipeline`, resolution presets, TurboJPEG, and GL display changes.
+
 ## Testing
 
 ### Smoke

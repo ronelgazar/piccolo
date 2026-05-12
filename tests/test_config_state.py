@@ -191,3 +191,9 @@ def test_camera_fps_loads_from_yaml(tmp_path):
     assert cfg.cameras.left.fps == 30
     assert cfg.cameras.left.width == 1280
     assert cfg.cameras.left.height == 720
+
+
+def test_performance_latency_watermark_default():
+    from src.config import PerformanceCfg
+
+    assert PerformanceCfg().latency_watermark is False

@@ -150,6 +150,7 @@ class PerformanceCfg:
     low_latency_mode: bool = False
     use_gpu_for_depth: bool = True
     use_gpu_pipeline: bool = True   # NEW: GPU-resident hot path (Phase 1)
+    latency_watermark: bool = False  # draw timestamp for glass-to-glass measurement
 
 
 @dataclass
