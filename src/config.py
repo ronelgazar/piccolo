@@ -26,6 +26,7 @@ class CameraDeviceCfg:
     width: int = 640
     height: int = 480
     flip_180: bool = False  # rotate feed 180° (correct upside-down mounting)
+    fps: int = 60            # requested camera framerate; driver may negotiate lower
 
 
 @dataclass

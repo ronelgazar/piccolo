@@ -167,3 +167,27 @@ def test_performance_config_use_gpu_pipeline_loads_from_yaml(tmp_path):
     yaml_path.write_text(yaml.safe_dump({"performance": {"use_gpu_pipeline": False}}))
     cfg = load_config(str(yaml_path))
     assert cfg.performance.use_gpu_pipeline is False
+
+
+def test_camera_device_cfg_has_fps_default():
+    from src.config import CameraDeviceCfg
+
+    cfg = CameraDeviceCfg()
+    assert hasattr(cfg, "fps")
+    assert cfg.fps == 60
+
+
+def test_camera_fps_loads_from_yaml(tmp_path):
+    import yaml
+    from src.config import load_config
+
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump({
+        "cameras": {
+            "left": {"index": 2, "width": 1280, "height": 720, "fps": 30},
+        }
+    }))
+    cfg = load_config(str(path))
+    assert cfg.cameras.left.fps == 30
+    assert cfg.cameras.left.width == 1280
+    assert cfg.cameras.left.height == 720

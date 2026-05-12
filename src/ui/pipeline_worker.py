@@ -171,11 +171,15 @@ class PipelineWorker(QThread):
             self.cam_l = TestPatternCamera(c.left.width, c.left.height, side="left", name="test-L").start()
             self.cam_r = TestPatternCamera(c.right.width, c.right.height, side="right", name="test-R").start()
             return
-        self.cam_l = CameraCapture(c.left.index, c.left.width, c.left.height,
-                                    backend=c.backend, name="cam-L").start()
+        self.cam_l = CameraCapture(
+            c.left.index, c.left.width, c.left.height,
+            fps=c.left.fps, backend=c.backend, name="cam-L",
+        ).start()
         try:
-            self.cam_r = CameraCapture(c.right.index, c.right.width, c.right.height,
-                                        backend=c.backend, name="cam-R").start()
+            self.cam_r = CameraCapture(
+                c.right.index, c.right.width, c.right.height,
+                fps=c.right.fps, backend=c.backend, name="cam-R",
+            ).start()
         except Exception:
             if self.cam_l is not None:
                 self.cam_l.stop()
