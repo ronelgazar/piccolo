@@ -175,11 +175,13 @@ class PipelineWorker(QThread):
         self.cam_l = CameraCapture(
             c.left.index, c.left.width, c.left.height,
             fps=c.left.fps, backend=c.backend, name="cam-L",
+            decode_backend=c.left.decode_backend,
         ).start()
         try:
             self.cam_r = CameraCapture(
                 c.right.index, c.right.width, c.right.height,
                 fps=c.right.fps, backend=c.backend, name="cam-R",
+                decode_backend=c.right.decode_backend,
             ).start()
         except Exception:
             if self.cam_l is not None:

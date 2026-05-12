@@ -18,6 +18,14 @@ from typing import Optional, List, Tuple
 import cv2
 import numpy as np
 
+try:
+    from turbojpeg import TJPF_BGR, TurboJPEG
+    _TJ_AVAILABLE = True
+except ImportError:
+    TJPF_BGR = None
+    TurboJPEG = None
+    _TJ_AVAILABLE = False
+
 
 class CameraCapture:
     """Threaded camera capture that continuously grabs frames in the
@@ -31,6 +39,7 @@ class CameraCapture:
         fps: int = 60,
         backend: str = "opencv",
         name: str = "camera",
+        decode_backend: str = "opencv",
     ):
         self.index = index
         self.width = width
@@ -38,6 +47,9 @@ class CameraCapture:
         self.fps = fps
         self.backend = backend
         self.name = name
+        self.decode_backend = decode_backend
+        self._tj = None
+        self._raw_mode_ok = False
 
         self._frame: Optional[np.ndarray] = None
         self._frame_id: int = 0
@@ -52,6 +64,7 @@ class CameraCapture:
 
     def start(self) -> "CameraCapture":
         """Open the camera and start the background grab thread."""
+        self._try_init_turbojpeg()
         if self.backend == "picamera2":
             self._open_picamera2()
         else:
@@ -160,6 +173,36 @@ class CameraCapture:
             f"[camera] {self.name}: opened index={self.index}  "
             f"{actual_w}x{actual_h} @ {actual_fps:.0f}fps  fourcc={fourcc_str}"
         )
+        self._try_enable_raw_mode()
+
+    def _try_init_turbojpeg(self) -> None:
+        """Try to construct a TurboJPEG instance; leave None on fallback."""
+        if self.decode_backend != "turbojpeg":
+            return
+        if not _TJ_AVAILABLE or TurboJPEG is None:
+            print(f"[camera] {self.name}: PyTurboJPEG not installed; falling back to OpenCV decode")
+            return
+        try:
+            self._tj = TurboJPEG()
+        except Exception as exc:
+            print(f"[camera] {self.name}: TurboJPEG init failed ({exc}); falling back")
+            self._tj = None
+
+    def _try_enable_raw_mode(self) -> None:
+        """Try to put VideoCapture into raw-bytes mode for TurboJPEG decode."""
+        if self._cap is None or self._tj is None:
+            return
+        try:
+            self._cap.set(cv2.CAP_PROP_FORMAT, -1)
+            fmt = self._cap.get(cv2.CAP_PROP_FORMAT)
+            self._raw_mode_ok = int(fmt) == -1
+            if self._raw_mode_ok:
+                print(f"[camera] {self.name}: TurboJPEG fast-path enabled (raw MJPEG bytes)")
+            else:
+                print(f"[camera] {self.name}: raw mode unsupported; TurboJPEG installed but unused")
+        except Exception as exc:
+            print(f"[camera] {self.name}: raw-mode probe failed ({exc})")
+            self._raw_mode_ok = False
 
     def _open_picamera2(self):
         try:
@@ -189,11 +232,21 @@ class CameraCapture:
 
         cap = self._cap
         while self._running:
-            ret, frame = cap.read()
-            if ret and frame is not None:
-                with self._lock:
-                    self._frame = frame
-                    self._frame_id += 1
+            ret, payload = cap.read()
+            if not ret or payload is None:
+                continue
+            if self._raw_mode_ok and self._tj is not None and payload.ndim == 1:
+                try:
+                    frame = self._tj.decode(payload.tobytes(), pixel_format=TJPF_BGR)
+                except Exception:
+                    frame = None
+            else:
+                frame = payload
+            if frame is None:
+                continue
+            with self._lock:
+                self._frame = frame
+                self._frame_id += 1
             # No sleep – read() already blocks until a frame arrives,
             # so this loop naturally runs at camera FPS.
 
