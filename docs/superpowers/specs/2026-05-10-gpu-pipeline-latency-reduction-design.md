@@ -144,6 +144,15 @@ cameras:
 
 True GPU MJPEG decode via `cv2.cudacodec.RawVideoSource`. Implement a Python subclass that pulls MJPEG bytes from a custom DirectShow Sample Grabber and yields them as packets to the NVDEC video reader. This is a research effort; only attempt if measured savings from Phases 1–4 are insufficient. Documented here so we don't lose the option.
 
+API probe on the current OpenCV CUDA build:
+
+- `cv2.cudacodec.RawVideoSource` exists.
+- A Python subclass can be instantiated.
+- `cv2.cudacodec.FormatInfo` exposes codec, chroma, width, height, FPS, and ROI fields.
+- `cv2.cudacodec.createVideoReader` exists.
+
+This means the OpenCV Python surface is not the first blocker. The hard blocker is still acquiring raw MJPEG packets from the UVC camera before OpenCV/DirectShow decodes them. Without a DirectShow or Media Foundation sample-grabber layer, Phase 5 cannot remove the CPU decode/upload step.
+
 ## Data flow & invariants
 
 ### GpuMat lifetime
