@@ -149,3 +149,21 @@ def test_smart_overlap_mode_and_pair_count_persist(tmp_path):
     cfg2 = load_config(str(p))
     assert cfg2.calibration_state.smart_overlap_mode == "live"
     assert cfg2.calibration_state.smart_overlap_pair_count == 12
+
+
+def test_performance_config_has_use_gpu_pipeline_default():
+    from src.config import PerformanceCfg
+
+    cfg = PerformanceCfg()
+    assert hasattr(cfg, "use_gpu_pipeline"), "PerformanceCfg missing use_gpu_pipeline"
+    assert cfg.use_gpu_pipeline is True, "default should be True"
+
+
+def test_performance_config_use_gpu_pipeline_loads_from_yaml(tmp_path):
+    import yaml
+    from src.config import load_config
+
+    yaml_path = tmp_path / "config.yaml"
+    yaml_path.write_text(yaml.safe_dump({"performance": {"use_gpu_pipeline": False}}))
+    cfg = load_config(str(yaml_path))
+    assert cfg.performance.use_gpu_pipeline is False

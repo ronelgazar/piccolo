@@ -84,6 +84,10 @@ controls:
   pedal_mode_b: side
   pedal_mode_c: updown
   pedal_repeat_ms: 100
+performance:
+  low_latency_mode: false
+  use_gpu_for_depth: true
+  use_gpu_pipeline: true
 smart_overlap:
   default_mode: chessboard
   pair_count: 8

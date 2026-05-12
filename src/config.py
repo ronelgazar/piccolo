@@ -137,6 +137,14 @@ class StreamCfg:
 
 
 @dataclass
+class PerformanceCfg:
+    """Performance tuning flags exposed in Settings."""
+    low_latency_mode: bool = False
+    use_gpu_for_depth: bool = True
+    use_gpu_pipeline: bool = True   # NEW: GPU-resident hot path (Phase 1)
+
+
+@dataclass
 class SmartOverlapCfg:
     default_mode: str = "chessboard"        # "chessboard" | "live"
     pair_count: int = 8                     # default; user-adjustable in spinbox (4-20)
@@ -157,6 +165,7 @@ class PiccoloCfg:
     calibration_state: CalibrationStateCfg = field(default_factory=CalibrationStateCfg)
     controls: ControlsCfg = field(default_factory=ControlsCfg)
     stream: StreamCfg = field(default_factory=StreamCfg)
+    performance: PerformanceCfg = field(default_factory=PerformanceCfg)
     smart_overlap: SmartOverlapCfg = field(default_factory=SmartOverlapCfg)
 
 
