@@ -115,3 +115,19 @@ def test_pipeline_worker_constructs_gpu_pipeline_when_flag_set():
     cfg2.performance.use_gpu_pipeline = False
     worker2 = PipelineWorker(cfg2)
     assert worker2._gpu_pipeline is None, "should be None when flag off"
+
+
+def test_pipeline_worker_does_not_gate_processing_on_emit_interval():
+    skip_if_no_cuda()
+    import time
+
+    from src.config import PiccoloCfg
+    from src.ui.pipeline_worker import PipelineWorker
+
+    cfg = PiccoloCfg()
+    cfg.cameras.test_mode = True
+    cfg.display.fps = 30
+    worker = PipelineWorker(cfg)
+
+    worker._last_emit_t = time.perf_counter()
+    assert worker._can_process_now(time.perf_counter()) is True

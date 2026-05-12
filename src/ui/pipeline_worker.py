@@ -248,11 +248,8 @@ class PipelineWorker(QThread):
         return bool(getattr(self.cfg, "performance", None) and getattr(self.cfg.performance, "low_latency_mode", False))
 
     def _can_process_now(self, now: float) -> bool:
-        # Throttle: skip the entire pipeline between emit windows so we don't
-        # do warp + process_pair work that nothing will ever see. Big CPU win.
-        if now - self._last_emit_t < self._emit_interval:
-            self.msleep(2)
-            return False
+        # Phase 1: process whenever a new camera frame is available. Frame-id
+        # deduplication below handles repeated reads without adding latency.
         return True
 
     def _read_frame_pair(self, perf: dict[str, float]) -> tuple[np.ndarray | None, np.ndarray | None, tuple[int, int]]:
