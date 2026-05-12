@@ -175,6 +175,53 @@ class CalibrationOverlay:
         eye_r = self._roll_and_zero(eye_r, self.nudge_right_y, axis=0)
         return eye_l, eye_r
 
+    def apply_nudge_gpu(
+        self,
+        gpu_l: "cv2.cuda_GpuMat",
+        gpu_r: "cv2.cuda_GpuMat",
+    ) -> None:
+        """In-place GPU equivalent of apply_nudge.
+
+        Translation uses cv2.cuda.warpAffine on-device. Scale changes are rare
+        calibration tweaks, so they fall back to the existing CPU scaler before
+        re-uploading the eye.
+        """
+        self._nudge_gpu_eye(
+            gpu_l, self.nudge_left, self.nudge_left_y, self.scale_left_pct
+        )
+        self._nudge_gpu_eye(
+            gpu_r, self.nudge_right, self.nudge_right_y, self.scale_right_pct
+        )
+
+    def _nudge_gpu_eye(
+        self,
+        gpu_eye: "cv2.cuda_GpuMat",
+        dx: int,
+        dy: int,
+        scale_pct: int,
+    ) -> None:
+        if scale_pct != 100:
+            arr = gpu_eye.download()
+            arr = self._scale_eye(arr, scale_pct)
+            gpu_eye.upload(arr)
+
+        if dx == 0 and dy == 0:
+            return
+
+        size = gpu_eye.size()  # (width, height)
+        m = np.float32([[1.0, 0.0, float(dx)], [0.0, 1.0, float(dy)]])
+        out = cv2.cuda_GpuMat(size[1], size[0], gpu_eye.type())
+        cv2.cuda.warpAffine(
+            gpu_eye,
+            m,
+            size,
+            out,
+            cv2.INTER_NEAREST,
+            cv2.BORDER_CONSTANT,
+            (0, 0, 0),
+        )
+        out.copyTo(gpu_eye)
+
     @staticmethod
     def _scale_eye(img: np.ndarray, scale_pct: int) -> np.ndarray:
         """Center-scale one eye, preserving the output frame size."""
