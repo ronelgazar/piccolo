@@ -23,15 +23,15 @@ Build a fully-GPU-resident hot path for a stereoscopic surgery display app. Each
 | Baseline restoration (WIP refactor of pipeline_worker + GPU helpers) | ✅ done | `d049d80` |
 | 3. Implement `fill_holes_cross_gpu` | ✅ done | `fbbaba0` |
 | 4. Add `warp_pair_gpu` to StereoAligner | ✅ done | `ba1f99d` |
-| 5. Add `process_pair_gpu` to StereoProcessor | ⏳ test file already written, implementation pending |
-| 6. Add `apply_nudge_gpu` to CalibrationOverlay | ⏳ pending |
-| 7. Implement `GpuPipeline` orchestrator | ⏳ pending |
-| 8. Wire `pipeline_worker.py` to use `GpuPipeline` | ⏳ pending |
-| 9. Remove `_can_process_now` throttle | ⏳ pending |
-| 10. Add `cv2.cuda_Event` GPU-side timing | ⏳ pending |
-| 11. Performance regression test | ⏳ pending |
+| 5. Add `process_pair_gpu` to StereoProcessor | ✅ done | `b508066` |
+| 6. Add `apply_nudge_gpu` to CalibrationOverlay | ✅ done | `cb83a5b` |
+| 7. Implement `GpuPipeline` orchestrator | ✅ done | `8b8ed32` |
+| 8. Wire `pipeline_worker.py` to use `GpuPipeline` | ✅ done | `f3c30dd` |
+| 9. Remove `_can_process_now` throttle | ✅ done | `3460f50` |
+| 10. Add `cv2.cuda_Event` GPU-side timing | ✅ done | `1b86157` |
+| 11. Performance regression test | ✅ done | `ddf3844` |
 
-**Task 5 partial state:** The test file `tests/test_gpu_pipeline_processor.py` is already written and is currently failing because `process_pair_gpu` doesn't exist. Continue from "Step 3: Implement" in Task 5 below.
+**Continuation state:** Tasks 5-11 are complete and committed. Final verification passed with the non-recording test suite.
 
 ## Critical gotchas (learned the hard way during prior tasks)
 
