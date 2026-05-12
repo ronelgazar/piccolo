@@ -25,6 +25,26 @@ def save_calibration_state(cfg: PiccoloCfg, path: str | None = None) -> None:
         yaml.safe_dump(raw, fh, sort_keys=False)
 
 
+def save_camera_settings(cfg: PiccoloCfg, path: str | None = None) -> None:
+    """Persist current camera width, height, and FPS without clobbering YAML."""
+    if path is None:
+        path = _default_config_path()
+    raw: dict[str, Any] = {}
+    if os.path.isfile(path):
+        with open(path, "r", encoding="utf-8") as fh:
+            raw = yaml.safe_load(fh) or {}
+
+    cams = raw.setdefault("cameras", {})
+    for side, dev in (("left", cfg.cameras.left), ("right", cfg.cameras.right)):
+        section = cams.setdefault(side, {})
+        section["width"] = dev.width
+        section["height"] = dev.height
+        section["fps"] = dev.fps
+
+    with open(path, "w", encoding="utf-8") as fh:
+        yaml.safe_dump(raw, fh, sort_keys=False)
+
+
 def _default_config_path() -> str:
     return default_config_path()
 

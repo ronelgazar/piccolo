@@ -24,6 +24,7 @@ class MainWindow(QMainWindow):
         self.resize(1280, 800)
 
         self.worker = PipelineWorker(cfg, self)
+        self.worker.request_restart.connect(self._restart_worker)
 
         self.tabs = QTabWidget(self)
         self.live_tab = LiveTab(self.worker, self)
@@ -108,3 +109,44 @@ class MainWindow(QMainWindow):
         if not self._smart_overlap_to_goovis:
             return
         self.worker.set_smart_overlap_metrics(metrics)
+
+    def _restart_worker(self) -> None:
+        was_running = self.worker.isRunning()
+        if hasattr(self, "calibration_tab"):
+            self.calibration_tab.stop_background_work()
+        if hasattr(self, "recording_tab"):
+            self.recording_tab.stop_recording()
+        if self.worker.isRunning():
+            self.worker.stop()
+
+        old_tabs = self.tabs
+        self.worker = PipelineWorker(self.cfg, self)
+        self.worker.request_restart.connect(self._restart_worker)
+
+        self.tabs = QTabWidget(self)
+        self.live_tab = LiveTab(self.worker, self)
+        self.calibration_tab = CalibrationTab(self.worker, self)
+        self.settings_tab = SettingsTab(self.worker, self)
+        self.recording_tab = RecordingTab(self.worker, self)
+        self.tabs.addTab(self.live_tab, "Live")
+        self.tabs.addTab(self.calibration_tab, "Calibration")
+        self.tabs.addTab(self.recording_tab, "Recording")
+        self.tabs.addTab(self.settings_tab, "Settings")
+        self.tabs.currentChanged.connect(self._on_tab_changed)
+        self.setCentralWidget(self.tabs)
+        old_tabs.deleteLater()
+        self._on_tab_changed(self.tabs.currentIndex())
+
+        if self.goovis is not None:
+            self.worker.sbs_qimage_ready.connect(self._on_goovis_worker_frame)
+            if hasattr(self.calibration_tab, "overlay_mode_changed"):
+                self.calibration_tab.overlay_mode_changed.connect(self._on_overlay_mode_changed)
+            if hasattr(self.calibration_tab, "overlay_frame_ready"):
+                self.calibration_tab.overlay_frame_ready.connect(self._on_goovis_overlay_frame)
+            if hasattr(self.calibration_tab, "smart_overlap_mode_changed"):
+                self.calibration_tab.smart_overlap_mode_changed.connect(self._on_smart_overlap_mode_changed)
+            if hasattr(self.calibration_tab, "smart_overlap_metrics_ready"):
+                self.calibration_tab.smart_overlap_metrics_ready.connect(self._on_smart_overlap_metrics)
+
+        if was_running:
+            self.worker.start()

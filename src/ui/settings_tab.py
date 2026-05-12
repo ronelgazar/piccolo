@@ -12,7 +12,14 @@ from PyQt6.QtWidgets import (
     QMessageBox, QFileDialog,
 )
 
-from ..config_state import save_calibration_state, _default_config_path
+from ..config_state import save_calibration_state, save_camera_settings, _default_config_path
+
+
+RESOLUTION_PRESETS: list[tuple[str, int, int, int]] = [
+    ("640x480 @ 60", 640, 480, 60),
+    ("1280x720 @ 60", 1280, 720, 60),
+    ("1920x1080 @ 30", 1920, 1080, 30),
+]
 
 
 class SettingsTab(QWidget):
@@ -39,6 +46,22 @@ class SettingsTab(QWidget):
         box = QGroupBox("Cameras (requires app restart to apply)", self)
         form = QFormLayout(box)
         c = self.worker.cfg.cameras
+        self.resolution_combo = QComboBox(self)
+        for label, *_ in RESOLUTION_PRESETS:
+            self.resolution_combo.addItem(label)
+        current = (c.left.width, c.left.height, c.left.fps)
+        current_idx = 0
+        for i, (_, w, h, fps) in enumerate(RESOLUTION_PRESETS):
+            if (w, h, fps) == current or (w, h) == current[:2]:
+                current_idx = i
+                break
+        self.resolution_combo.setCurrentIndex(current_idx)
+        self._pending_resolution = RESOLUTION_PRESETS[current_idx]
+        self.resolution_combo.currentIndexChanged.connect(self._on_resolution_changed)
+        self.apply_resolution_btn = QPushButton("Apply (restart camera)", self)
+        self.apply_resolution_btn.clicked.connect(self._apply_resolution)
+        form.addRow(QLabel("Resolution preset"), self.resolution_combo)
+        form.addRow(self.apply_resolution_btn)
         form.addRow(QLabel("Left index"),  self._spinbox(c.left.index, 0, 10,
                                                           lambda v: setattr(c.left, "index", v)))
         form.addRow(QLabel("Right index"), self._spinbox(c.right.index, 0, 10,
@@ -54,6 +77,20 @@ class SettingsTab(QWidget):
             lambda s: setattr(c.right, "flip_180", s == Qt.CheckState.Checked.value))
         form.addRow(cb_flip_r)
         return box
+
+    def _on_resolution_changed(self, idx: int) -> None:
+        if 0 <= idx < len(RESOLUTION_PRESETS):
+            self._pending_resolution = RESOLUTION_PRESETS[idx]
+
+    def _apply_resolution(self) -> None:
+        _, width, height, fps = self._pending_resolution
+        cfg = self.worker.cfg.cameras
+        for eye in (cfg.left, cfg.right):
+            eye.width = width
+            eye.height = height
+            eye.fps = fps
+        save_camera_settings(self.worker.cfg)
+        self.worker.request_restart.emit()
 
     # ------------------ Display ----------------------------------------
 

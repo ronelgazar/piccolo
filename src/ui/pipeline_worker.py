@@ -32,6 +32,7 @@ class PipelineWorker(QThread):
     status_tick = pyqtSignal(dict)              # FPS, alignment, pedal mode
     recording_frame_ready = pyqtSignal(object)  # dict with BGR ndarray copies
     error = pyqtSignal(str)
+    request_restart = pyqtSignal()
 
     def __init__(self, cfg: PiccoloCfg, parent: QObject | None = None):
         super().__init__(parent)
