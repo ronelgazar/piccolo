@@ -84,6 +84,7 @@ performance:
   use_gpu_for_depth: true
   use_gpu_pipeline: true
   latency_watermark: false
+  use_gl_display: false
 controls:
   zoom_in:
   - EQUALS

@@ -46,3 +46,11 @@ def test_settings_tab_exposes_resolution_dropdown(qtbot):
     assert "640x480 @ 60" in items
     assert "1280x720 @ 60" in items
     assert "1920x1080 @ 30" in items
+
+
+def test_gl_display_widget_constructs(qtbot):
+    from src.ui.gl_display_widget import GLDisplayWidget
+
+    w = GLDisplayWidget()
+    qtbot.addWidget(w)
+    assert w is not None

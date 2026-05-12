@@ -213,3 +213,9 @@ def test_camera_decode_backend_loads_from_yaml(tmp_path):
     path.write_text(yaml.safe_dump({"cameras": {"left": {"decode_backend": "turbojpeg"}}}))
     cfg = load_config(str(path))
     assert cfg.cameras.left.decode_backend == "turbojpeg"
+
+
+def test_performance_use_gl_display_default():
+    from src.config import PerformanceCfg
+
+    assert PerformanceCfg().use_gl_display is False
