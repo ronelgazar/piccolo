@@ -96,3 +96,22 @@ def test_gpu_pipeline_handles_repeated_calls_without_reallocating():
     pipeline.process(frame_l, frame_r)
     sbs_id_after = id(pipeline._gpu_sbs)
     assert sbs_id_before == sbs_id_after, "buffers reallocated unnecessarily"
+
+
+def test_pipeline_worker_constructs_gpu_pipeline_when_flag_set():
+    skip_if_no_cuda()
+    from src.config import PiccoloCfg
+    from src.ui.pipeline_worker import PipelineWorker
+
+    cfg = PiccoloCfg()
+    cfg.cameras.test_mode = True
+    cfg.performance.use_gpu_pipeline = True
+
+    worker = PipelineWorker(cfg)
+    assert worker._gpu_pipeline is not None, "GpuPipeline should be constructed"
+
+    cfg2 = PiccoloCfg()
+    cfg2.cameras.test_mode = True
+    cfg2.performance.use_gpu_pipeline = False
+    worker2 = PipelineWorker(cfg2)
+    assert worker2._gpu_pipeline is None, "should be None when flag off"

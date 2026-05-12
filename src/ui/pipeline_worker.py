@@ -110,6 +110,19 @@ class PipelineWorker(QThread):
         # GPU support flags (detect at init, cache the result)
         self._cuda_available = self._detect_cuda()
         self._cuda_caps = self._query_cuda_capabilities() if self._cuda_available else {}
+        self._use_gpu_pipeline = bool(
+            self._cuda_available
+            and getattr(cfg, "performance", None)
+            and getattr(cfg.performance, "use_gpu_pipeline", False)
+        )
+        if self._use_gpu_pipeline:
+            from ..gpu_pipeline import GpuPipeline
+
+            self._gpu_pipeline = GpuPipeline(
+                self.aligner, self.processor, self.calibration
+            )
+        else:
+            self._gpu_pipeline = None
         self._gpu_warp_upload_time = 0.0
         gpu_status = "GPU-ACCELERATED" if self._cuda_available else "CPU-ONLY"
         print(f"[Pipeline] Initialized in {gpu_status} mode")
@@ -192,19 +205,36 @@ class PipelineWorker(QThread):
         frame_l, frame_r = self._apply_camera_flips(frame_l, frame_r)
         self._maybe_emit_recording_frame(frame_l, frame_r, now)
         low_latency = self._low_latency_enabled()
-        frame_l, frame_r, perf['align_warp_ms'] = self._maybe_update_and_warp(frame_l, frame_r, low_latency)
-        # Fill any black/invalid pixels in one eye with the other eye's pixels
-        try:
-            t_fill = time.perf_counter()
-            frame_l, frame_r = self._fill_holes_cross(frame_l, frame_r)
-            perf['fill_ms'] = (time.perf_counter() - t_fill) * 1000.0
-        except Exception:
+        if self._gpu_pipeline is not None and not low_latency:
+            t_warp = time.perf_counter()
+            if (
+                self.aligner.needs_update()
+                and not self.cfg.calibration_state.alignment_locked
+            ):
+                self.aligner.update(frame_l, frame_r)
+            sbs = self._gpu_pipeline.process(frame_l, frame_r)
+            perf['align_warp_ms'] = (time.perf_counter() - t_warp) * 1000.0
             perf['fill_ms'] = 0.0
-        self._last_depth_mm, perf['depth_ms'] = self._maybe_update_depth(frame_l, frame_r, low_latency)
+            perf['process_nudge_ms'] = 0.0
+            self._last_depth_mm, perf['depth_ms'] = self._maybe_update_depth(
+                frame_l, frame_r, low_latency
+            )
+        else:
+            frame_l, frame_r, perf['align_warp_ms'] = self._maybe_update_and_warp(frame_l, frame_r, low_latency)
+            # Fill any black/invalid pixels in one eye with the other eye's pixels
+            try:
+                t_fill = time.perf_counter()
+                frame_l, frame_r = self._fill_holes_cross(frame_l, frame_r)
+                perf['fill_ms'] = (time.perf_counter() - t_fill) * 1000.0
+            except Exception:
+                perf['fill_ms'] = 0.0
+            self._last_depth_mm, perf['depth_ms'] = self._maybe_update_depth(
+                frame_l, frame_r, low_latency
+            )
 
-        eye_l, eye_r, sbs, perf['process_nudge_ms'] = self._process_and_nudge(frame_l, frame_r)
-        sbs[:, :self.processor.eye_w] = eye_l
-        sbs[:, self.processor.eye_w:] = eye_r
+            eye_l, eye_r, sbs, perf['process_nudge_ms'] = self._process_and_nudge(frame_l, frame_r)
+            sbs[:, :self.processor.eye_w] = eye_l
+            sbs[:, self.processor.eye_w:] = eye_r
 
         calibration_sbs = self._maybe_build_calibration_sbs(frame_l, frame_r, sbs, now)
         self._maybe_emit_calibration_sbs(calibration_sbs, sbs, now)
