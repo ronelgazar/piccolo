@@ -39,7 +39,17 @@ class LiveTab(QWidget):
         preview_wrap = QWidget(self)
         stack = QStackedLayout(preview_wrap)
         stack.setStackingMode(QStackedLayout.StackingMode.StackAll)
-        self.preview = VideoWidget(preview_wrap)
+        self._use_gl_display = bool(
+            getattr(worker, "cfg", None)
+            and getattr(worker.cfg, "performance", None)
+            and getattr(worker.cfg.performance, "use_gl_display", False)
+        )
+        if self._use_gl_display:
+            from .gl_display_widget import GLDisplayWidget
+
+            self.preview = GLDisplayWidget(preview_wrap)
+        else:
+            self.preview = VideoWidget(preview_wrap)
         self.canvas = AnnotationCanvas(preview_wrap)
         self.hud = QWidget(preview_wrap)
         self.hud.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
@@ -77,7 +87,10 @@ class LiveTab(QWidget):
 
         # Wire signals
         if worker is not None:
-            worker.sbs_qimage_ready.connect(self.preview.set_frame)
+            if self._use_gl_display:
+                worker.sbs_ndarray_ready.connect(self.preview.set_frame)
+            else:
+                worker.sbs_qimage_ready.connect(self.preview.set_frame)
             worker.status_tick.connect(self._on_status)
 
     # ------------------------------------------------------------------

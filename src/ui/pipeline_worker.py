@@ -28,6 +28,7 @@ class PipelineWorker(QThread):
     """Long-running backend thread."""
 
     sbs_frame_ready = pyqtSignal(object)        # np.ndarray — processed SBS (for overlay/wizard)
+    sbs_ndarray_ready = pyqtSignal(object)      # np.ndarray — processed SBS (for GL display)
     sbs_qimage_ready = pyqtSignal(object)       # QImage — processed SBS (for display)
     status_tick = pyqtSignal(dict)              # FPS, alignment, pedal mode
     recording_frame_ready = pyqtSignal(object)  # dict with BGR ndarray copies
@@ -256,6 +257,7 @@ class PipelineWorker(QThread):
             from .latency_watermark import draw_timestamp_watermark
 
             draw_timestamp_watermark(sbs, time.monotonic() * 1000.0)
+        self.sbs_ndarray_ready.emit(sbs)
         self.sbs_qimage_ready.emit(ndarray_to_qimage(sbs))
         perf['qimage_ms'] = (time.perf_counter() - t_q) * 1000.0
         self._finalize_frame(perf, t0, now)

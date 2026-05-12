@@ -54,3 +54,18 @@ def test_gl_display_widget_constructs(qtbot):
     w = GLDisplayWidget()
     qtbot.addWidget(w)
     assert w is not None
+
+
+def test_live_tab_uses_gl_display_when_flag_set(qtbot):
+    from src.config import PiccoloCfg
+    from src.ui.gl_display_widget import GLDisplayWidget
+    from src.ui.live_tab import LiveTab
+    from src.ui.pipeline_worker import PipelineWorker
+
+    cfg = PiccoloCfg()
+    cfg.cameras.test_mode = True
+    cfg.performance.use_gl_display = True
+    worker = PipelineWorker(cfg)
+    tab = LiveTab(worker)
+    qtbot.addWidget(tab)
+    assert isinstance(tab.preview, GLDisplayWidget)
