@@ -256,6 +256,40 @@ class StereoAligner:
 
         return self._dst_l, self._dst_r
 
+    def warp_pair_gpu(
+        self,
+        gpu_l: "cv2.cuda_GpuMat",
+        gpu_r: "cv2.cuda_GpuMat",
+        out_l: "cv2.cuda_GpuMat",
+        out_r: "cv2.cuda_GpuMat",
+    ) -> bool:
+        """GPU equivalent of `warp_pair`.
+
+        Writes the warped frames into `out_l` / `out_r`. Returns True if a
+        warp was applied; False if the aligner is disabled or has no
+        correction yet (in that case callers should fall back to a copy).
+        """
+        if not self._enabled or self._warp_l is None:
+            return False
+
+        size = gpu_l.size()  # (width, height)
+        cv2.cuda.warpAffine(
+            gpu_l, self._warp_l, size, out_l, cv2.INTER_LINEAR,
+            cv2.BORDER_CONSTANT, (0, 0, 0, 0),
+        )
+        cv2.cuda.warpAffine(
+            gpu_r, self._warp_r, size, out_r, cv2.INTER_LINEAR,
+            cv2.BORDER_CONSTANT, (0, 0, 0, 0),
+        )
+
+        if self.cfg.mask_overlap and self._overlap_mask_3ch is not None:
+            # Mask overlap stays CPU-side for now; uploading the mask each
+            # frame would defeat the purpose. Phase 1 leaves mask_overlap
+            # off (it's already false by default in config).
+            pass
+
+        return True
+
     def force_update(self):
         """Force the next ``needs_update()`` call to return True."""
         self._last_update = 0.0
